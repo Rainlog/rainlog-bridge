@@ -60,9 +60,9 @@ idf_component_register(
     # bytes by config_server. TXTFILES are null-terminated.
     EMBED_TXTFILES
         "web/index.html"
-        # EXPERIMENT (uncommitted): self-signed cert + key for the HTTPS
-        # capture server, to test whether an HTTPS console (AcuRite) tolerates
-        # an untrusted cert. See capture_server.c / main/certs.
+        # Self-signed cert + key for the HTTPS capture server: some consoles
+        # (AcuRite) upload to the spoofed WU host over TLS. Committed on
+        # purpose; see main/certs/README.md for why that is safe here.
         "certs/wu_cert.pem"
         "certs/wu_key.pem"
     # The raindrop PNG, served as /favicon.ico so pages that aren't the

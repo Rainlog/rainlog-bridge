@@ -11,8 +11,7 @@
 # from main/board.h (one image stream per flash variant).
 #
 # OUTDIR defaults to ./dist (gitignored). To publish, rsync its contents to the
-# server directory nginx serves under /rainlog-bridge-ota/ (in the Rainlog
-# repo that is docker/bridge-ota/firmware/).
+# document root the web server exposes under /rainlog-bridge-ota/.
 #
 # The bridge polls https://rainlog.org/rainlog-bridge-ota/manifest-<board>.json,
 # compares `version` to the running firmware, and downloads `url` if newer.

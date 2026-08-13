@@ -198,8 +198,12 @@ writing peripheral code from scratch.
   signs everyone out. Failed logins are throttled. HTTP Basic auth with the
   same password is accepted for scripting, but no `WWW-Authenticate` header is
   ever sent, so browsers never pop a native dialog.
-- Secrets are never echoed back by the config API, only reported as
-  is-set booleans.
+- WiFi passwords are never returned by the config API. **The per-gauge WU
+  upload keys are**, deliberately: `GET /config` includes them so the page can
+  populate the form (shown behind a Show toggle). They are per-station upload
+  keys rather than network credentials, and the route is already gated to the
+  SoftAP side or a signed-in LAN session. Anyone treating the configurator as
+  reachable by an untrusted party should account for that.
 - **A private key is committed** in `main/certs/`, on purpose. Read
   [`main/certs/README.md`](main/certs/README.md) before concluding otherwise.
 
@@ -218,4 +222,5 @@ Three carve-outs, none of which MIT covers:
 
 Note also that a default build uploads readings to, and fetches firmware
 updates from, `rainlog.org`. A fork intended for another service should
-repoint `CFG_RAINLOG_HOST` and `CFG_OTA_HOST` in `main/config.h`.
+repoint `CFG_RAINLOG_HOST` and `CFG_OTA_HOST` in `main/config.example.h` (and
+so in the `main/config.h` you copy from it).

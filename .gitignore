@@ -27,7 +27,7 @@ tools/*.bdf
 dist/
 
 # Internal working notes, deliberately not published; README.md is the
-# documentation that ships. PLAN.md was removed outright (its history lives in
-# the Rainlog repo); both names stay listed so neither can reappear in a commit.
+# documentation that ships. PLAN.md was removed outright; both names stay
+# listed so neither can reappear in a commit.
 AGENTS.md
 PLAN.md

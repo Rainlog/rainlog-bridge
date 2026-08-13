@@ -22,7 +22,7 @@ CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
 CONFIG_ESP_TLS_USING_MBEDTLS=y
 
-# TLS memory: the C6's heap is tight (AP+STA WiFi plus the ~220KB LCD double
+# TLS memory: the C6's heap is tight (AP+STA WiFi plus the ~110KB LCD
 # framebuffer), so the static 16KB TLS RX buffer pushed the first handshake to
 # rainlog.org over the edge: mbedtls_ssl_setup failed with
 # PSA_ERROR_INSUFFICIENT_MEMORY (-0x008D), breaking both forwarding and OTA.

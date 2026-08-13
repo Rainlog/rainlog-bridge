@@ -9,8 +9,8 @@ void screen_reset_draw(uint32_t held_ms) {
   ui_center_text(20, 3, COLOR_RED, "FACTORY");
   ui_center_text(60, 3, COLOR_RED, "RESET");
 
-  // Whole seconds left until the reset fires (floor), clamped at 0. With a ~10s
-  // hold this starts at 9 and ticks 9, 8, ... 0.
+  // Whole seconds left until the reset fires (floor), clamped at 0. With the ~11s
+  // hold this starts at 10 and ticks 10, 9, ... 0.
   uint32_t remaining =
       (held_ms >= RESET_HOLD_MS) ? 0 : (RESET_HOLD_MS - held_ms) / 1000;
   char n[8];
