@@ -1,76 +1,143 @@
 # Rainlog Wireless Bridge
 
 ESP32-C6 firmware that lets an existing personal weather station report rain to
-[Rainlog.org](https://rainlog.org) without replacing the station or reconfiguring
-anything on it permanently.
+[Rainlog.org](https://rainlog.org) without replacing the station.
 
 Most consumer weather station consoles can upload to Weather Underground and
 nowhere else. This device stands in for Weather Underground: the console
 uploads to the bridge believing it is talking to WU, and the bridge forwards
 the reading to Rainlog, then relays it on to the real Weather Underground so
-the owner keeps their existing WU station working.
+your existing WU station keeps working.
 
-The console needs no firmware change and no vendor cooperation. It only needs
-to be pointed at the bridge's WiFi network.
+Your console needs no firmware change and no vendor cooperation. It only needs
+to be pointed at the bridge's WiFi.
+
+## Setting up your bridge
+
+**1. Get your station credentials from Rainlog.**
+
+On [rainlog.org](https://rainlog.org), set your gauge's reporting mode to
+**Automatic**, then open the gauge and click **View station credentials**.
+Keep the **Weather Underground** tab selected and note two values:
+
+- **Station ID**, which looks like `Rainlog12345`
+- **Station key**
+
+**2. Power on the bridge.**
+
+The screen shows a setup message with the bridge's own WiFi name and password.
+
+**3. Connect the bridge to your home WiFi.**
+
+Join the bridge's WiFi from a phone or laptop. A setup page should open by
+itself; if it does not, browse to `http://10.41.0.1`.
+
+Pick your home network from the list and enter its password. There is a Test
+button that checks the password before you commit to it. Save, and the bridge
+restarts and shows its status screen.
+
+While you are here, set a new password for the bridge's own WiFi. It must be at
+least 8 characters, and the default is rejected.
+
+**4. Point your weather station at the bridge.**
+
+In your console's settings, find where it uploads to Weather Underground and
+set:
+
+- **Station ID**: the `Rainlog12345` value from step 1
+- **Station key / password**: the station key from step 1
+
+Then join the console to the **bridge's** WiFi instead of your home WiFi.
+
+Leave the protocol set to Weather Underground. Some consoles offer an
+"Ecowitt" or "Customized" mode; those upload a different way and the bridge
+will not see them.
+
+**5. Check that it works.**
+
+Wait for your console's next upload (typically well under 5 minutes). The
+bridge's screen shows a Forwarding count that ticks up, and the LED pulses
+green on each successful forward. Your readings then appear on rainlog.org.
+
+If you also want to keep uploading to Weather Underground, enter your WU
+station ID and key on the bridge's setup page and it will relay there too.
+
+### If something is wrong
+
+The bridge's screen lists your home WiFi, its own WiFi, and per-device counts,
+which is usually enough to tell where a problem is. The setup page's Devices
+tab shows each connected station with any error reason.
+
+- **LED solid red**: an error. Check the screen.
+- **LED blue**: not yet set up, or still connecting.
+- **Nothing forwarding**: confirm the console joined the *bridge's* WiFi and
+  that its protocol is Weather Underground, not Ecowitt.
+
+You can reach the setup page later from your home network too. Browse to the
+bridge's home IP shown on its screen and sign in with the bridge's WiFi
+password.
+
+### Buttons
+
+- **BOOT tap**: wakes the backlight, which dims after 30 seconds idle.
+- **BOOT held about 11 seconds**: factory reset. Wipes configuration, device
+  names, and stored statistics.
 
 ## How it works
 
-The bridge runs SoftAP and station mode on one radio at the same time:
+The bridge runs its own access point and joins your home WiFi at the same time,
+on one radio.
 
-- **SoftAP side** (`10.41.0.1/24`, WPA2): the weather station console joins
-  this. The subnet is deliberately off the common home ranges so it cannot
-  collide with the uplink side.
-- **Station side**: the bridge joins the home WiFi for its own internet access.
+- **Bridge side** (`10.41.0.1/24`, WPA2): your console joins this. The subnet is
+  deliberately off the common home ranges so it cannot collide with your LAN.
+- **Home side**: the bridge's uplink to the internet.
 
-The console's uploads are captured by spoofing WU on the SoftAP side:
+Uploads are captured by impersonating Weather Underground on the bridge side:
 
 1. `net/dns_server.c` (UDP :53) answers `*.wunderground.com` with the bridge's
-   own AP address, and proxies every other name to the real upstream resolver.
-   While the bridge is still unprovisioned it answers *all* names with the AP
-   address, making a full captive portal.
+   own address and proxies everything else to the real resolver. While
+   unprovisioned it answers all names, making a full captive portal.
 2. `net/capture_server.c` serves `/weatherstation/updateweatherstation.php` on
-   both port 80 and port 443. Some consoles (AcuRite among them) insist on TLS,
-   so there is an HTTPS listener with a self-signed certificate for the spoofed
-   hostname. See [`main/certs/README.md`](main/certs/README.md) for why a
-   private key is committed to this repository on purpose.
-3. It answers `success` immediately, then queues the raw query for the
-   forwarder, so a slow uplink never stalls the console.
-4. `forward/forwarder.c` sends the reading to Rainlog unchanged, and, if a WU
-   mapping is configured for that gauge, also relays it to the real WU with the
-   station id and password rewritten.
+   ports 80 and 443. Some consoles (AcuRite) insist on TLS, hence the HTTPS
+   listener with a self-signed certificate. See
+   [`main/certs/README.md`](main/certs/README.md) for why a private key is
+   committed here on purpose.
+3. It answers `success` immediately and queues the raw query, so a slow uplink
+   never stalls the console.
+4. `forward/forwarder.c` sends the reading to Rainlog unchanged, and relays to
+   the real WU with the ID and password rewritten when a mapping is set.
 
-The bridge also does real NAT for its SoftAP clients, so the console gets
-genuine internet access for NTP and vendor cloud services. Some consoles (again
-AcuRite) refuse to upload at all until their clock syncs.
+The bridge also NATs for its clients, so the console gets real internet for NTP
+and vendor services. Some consoles refuse to upload until their clock syncs.
 
-**Readings are not dropped on a flaky uplink.** The forwarder keeps a
-store-and-forward retry buffer mirrored to flash, so a reboot, a firmware
-update, or a crash does not lose an undelivered reading. It drains newest-first,
-because the WU protocol's rain fields are cumulative: the freshest reading
-already carries the full total.
+Readings survive a flaky uplink: the forwarder keeps a store-and-forward retry
+buffer mirrored to flash, so a reboot, an update, or a crash does not drop an
+undelivered reading. It drains newest-first, because the WU protocol's rain
+fields are cumulative and the freshest reading already carries the full total.
 
 ## Hardware
 
-**Waveshare ESP32-C6-LCD-1.47.** RISC-V single core, WiFi 6, with a 1.47 inch
-172x320 ST7789 LCD on board.
+**Waveshare ESP32-C6-LCD-1.47.** RISC-V single core, WiFi 6, 1.47 inch 172x320
+ST7789 LCD.
 
-The units this targets are **ESP32-C6FH8 with 8MB embedded flash**, despite
-the Waveshare spec and demo claiming 4MB. Verify yours with `esptool flash-id`.
+These units are **ESP32-C6FH8 with 8MB flash**, despite the Waveshare spec and
+demo claiming 4MB. Check yours with `esptool flash-id`.
 
-Flash size fixes the partition layout, and the layouts are not interchangeable,
-so there is **one image stream per flash variant**. The size is encoded in
-`BOARD_ID` (`main/board.h`), which also derives the OTA manifest filename, so a
-4MB build and an 8MB build can never fetch or apply each other's images.
+Flash size fixes the partition layout and the layouts are not interchangeable,
+so there is one image stream per variant, keyed on `BOARD_ID` (`main/board.h`).
 
 | Variant | `BOARD_ID` | Partitions | Status |
 |---|---|---|---|
 | C6FH8 (8MB) | `esp32-c6fh8-lcd-1.47` | `partitions.csv` | Built and shipping |
 | C6FH4 (4MB) | `esp32-c6fh4-lcd-1.47` | `partitions-c6fh4.csv` | Staged, untested (no hardware on hand) |
 
+The 4MB layout has no `storage` partition, so the retry buffer and statistics
+would not persist across reboots on that variant.
+
 ### GPIO map
 
-Shared SPI bus (LCD and SD): SCLK 7, MOSI 6, MISO 5. The single source of truth
-in code is `main/board.h`.
+Shared SPI bus (LCD and SD): SCLK 7, MOSI 6, MISO 5. Single source of truth is
+`main/board.h`.
 
 | Function | GPIO |
 |---|---|
@@ -80,147 +147,102 @@ in code is `main/board.h`.
 | RGB LED (WS2812) | 8 |
 | BOOT button | 9 |
 
-Note the onboard WS2812 is **RGB** wire order on this board, not the usual GRB.
+The onboard WS2812 is **RGB** wire order on this board, not the usual GRB.
 
 ## Building
 
-Native ESP-IDF, not Arduino. **Every build runs inside Docker**, against a
-pinned `espressif/idf` image, so no host toolchain is needed or assumed.
+Native ESP-IDF, not Arduino. Every build runs inside Docker against a pinned
+`espressif/idf` image, so no host toolchain is needed.
 
 ```sh
-cp main/config.example.h main/config.h   # required once, before the first build
+cp main/config.example.h main/config.h   # once, before the first build
 ./build.sh                               # build
-./build.sh flash                         # build, flash, and open the serial monitor
+./build.sh flash                         # build, flash, serial monitor
 ```
 
-`config.h` is gitignored. It holds only compile-time fallbacks; everything
-user-facing is provisioned at runtime through the web configurator. **Never
-commit WiFi passwords or PWS keys.**
+`config.h` is gitignored and holds only compile-time fallbacks; everything
+user-facing is provisioned at runtime. Never commit WiFi passwords or PWS keys.
 
-Flashing defaults to `/dev/ttyACM0` (the board enumerates as native USB CDC).
-Override with `PORT=/dev/ttyXXX ./build.sh flash`.
+Flashing defaults to `/dev/ttyACM0`; override with `PORT=/dev/ttyXXX`.
+`./build.sh flash` writes the bootloader, partition table, OTA data, and app.
 
-The target (`esp32c6`) is pinned in `sdkconfig.defaults`. The generated
-`sdkconfig` and `build/` are gitignored.
+`managed_components/` is committed rather than fetched, and `dependencies.lock`
+pins exact versions, so the build never needs network access.
 
-### Vendored dependencies
+### Configuration web UI
 
-`managed_components/` is **committed, not fetched**, and `dependencies.lock`
-pins exact versions and hashes. This is deliberate: the Docker build never
-needs network access, so a build is reproducible and cannot break because an
-upstream registry moved.
-
-### The configuration web UI
-
-The setup page is a small TypeScript + esbuild subproject under `web/`. It
-builds into a single self-contained `main/web/index.html` (CSS, JS, and favicon
-inlined and minified) that the firmware embeds.
+The setup page is a TypeScript + esbuild subproject in `web/`, built into a
+single self-contained `main/web/index.html` that the firmware embeds.
 
 ```sh
 cd web && npm install && npm run build
 ```
 
-**The generated `main/web/index.html` must be committed.** The ESP-IDF Docker
-image has no Node, so the firmware build never runs npm. Edit sources under
-`web/src/`, rebuild, and commit the regenerated file. `web/node_modules` is
-gitignored.
+**The generated `main/web/index.html` must be committed**: the IDF image has no
+Node, so the firmware build never runs npm. CI fails if it is stale.
 
-## First run
+### Reference drivers
 
-1. Flash and power on. The LCD shows the setup screen: the bridge's own WiFi
-   name, its password, and the setup address.
-2. Join that WiFi from a phone or laptop. The captive portal should open by
-   itself; if not, browse to `http://10.41.0.1`.
-3. Enter the home WiFi credentials (there is a scan list, and a test button
-   that tries them without saving), and set the gauge mapping. The Rainlog
-   station field accepts either `Rainlog<gaugeId>` or the bare gauge number.
-4. Save. The bridge reboots and comes up on the status screen.
-5. Point the weather station console at the bridge's WiFi, configured to upload
-   to Weather Underground as usual with station id `Rainlog<gaugeId>` and the
-   gauge's Rainlog PWS key as the password.
-
-The configurator is reachable afterwards from the home network too, at the
-bridge's home IP shown on its screen, gated by a sign-in using the bridge's own
-WiFi password.
-
-### Controls and indicators
-
-- **BOOT tap**: wakes the backlight (it dims after 30 seconds idle).
-- **BOOT held ~11 seconds**: factory reset, wiping configuration, device names,
-  and stored statistics.
-- **RGB LED**: solid red is an error, a green pulse is a successful forward,
-  blue means unprovisioned or connecting.
+`./fetch-demo.sh` downloads the official Waveshare demo (about 60MB, gitignored)
+for working ST7789, WS2812, SPI, and SD init sequences.
 
 ## Firmware updates (OTA)
 
-The bridge checks for updates shortly after its uplink comes up, then on a
-randomized 12 to 24 hour interval. Updates stream into the inactive OTA slot,
-are verified against the manifest's sha256 over the written partition before
-commit, and reboot. Rollback is enabled: the image is only marked valid about
-20 seconds after a successful boot, so an update that crash-loops reverts
-itself.
+The bridge checks shortly after its uplink comes up, then every 12 to 24 hours
+(randomized). Updates stream into the inactive slot, are verified against the
+manifest's sha256 before commit, and reboot. Rollback is enabled: the image is
+marked valid only about 20 seconds after a good boot, so an update that
+crash-loops reverts itself.
 
 To cut a release:
 
-1. Bump `PROJECT_VER` in `CMakeLists.txt`. It is the single source of truth,
-   baked into `esp_app_desc` and shown on the LCD.
-2. Run `./make-ota.sh`, which builds in Docker and writes
-   `dist/rainlog-bridge-<board>-<version>.bin` plus `manifest-<board>.json`.
-3. Publish by rsyncing `dist/` to the directory the web server exposes at
-   `/rainlog-bridge-ota/`.
+1. Bump `PROJECT_VER` in `CMakeLists.txt`. It is baked into `esp_app_desc` and
+   shown on the LCD.
+2. `./make-ota.sh` builds and writes `dist/rainlog-bridge-<board>-<version>.bin`
+   plus `manifest-<board>.json`.
+3. rsync `dist/` to the document root served at `/rainlog-bridge-ota/`.
 
-Filenames are versioned and immutable, so old images can stay for reference.
-The firmware fetches `manifest-<its own BOARD_ID>.json` and rejects a manifest
-whose `board` field does not match its own.
+Filenames are versioned and immutable. The firmware fetches
+`manifest-<its own BOARD_ID>.json` and rejects a manifest whose `board` does
+not match.
 
-Scope limits worth stating plainly: TLS to the update host validates against
-the bundled CA roots, but certificate *expiry* is not checked, because the
-build omits `MBEDTLS_HAVE_TIME_DATE`. Update integrity therefore rests on the
-manifest sha256 verified in firmware before commit. Secure boot, flash
-encryption, and anti-rollback are deliberately out of scope, since none of them
-are useful without burning eFuses.
+**OTA replaces the app only.** The bootloader and partition table are not
+touched, so a partition layout change cannot ship over the air and requires a
+USB reflash.
 
-## Reference: the Waveshare demo
-
-`./fetch-demo.sh` downloads and extracts the official Waveshare demo archive
-(about 60MB) into `ESP32-C6-LCD-1.47-Demo/`, which is gitignored. It is the
-reference for board bring-up: working init sequences and register flows for the
-ST7789 LCD, the WS2812 LED, the SPI bus, and the SD card. Consult it before
-writing peripheral code from scratch.
+Scope limits, stated plainly: TLS to the update host validates against the
+bundled CA roots, but certificate *expiry* is not checked, because the build
+omits `MBEDTLS_HAVE_TIME_DATE`. Update integrity rests on the manifest sha256
+verified before commit. Secure boot, flash encryption, and anti-rollback are
+deliberately out of scope, since none are useful without burning eFuses.
 
 ## Security notes
 
-- The two network sides are **not routed together** for the capture path. The
-  upload endpoint is gated to SoftAP-side requests, so nothing on the home LAN
-  or the internet can spoof a reading into it.
-- The configurator uses one secret, the bridge's own WiFi password. On the LAN
-  side it requires a sign-in that sets a RAM-only session cookie, so a reboot
+- The two network sides are not routed together for the capture path. The
+  upload endpoint is gated to bridge-side requests, so nothing on the home LAN
+  or the internet can inject a reading.
+- The configurator uses one secret, the bridge's own WiFi password. From the
+  LAN it requires a sign-in that sets a RAM-only session cookie, so a reboot
   signs everyone out. Failed logins are throttled. HTTP Basic auth with the
-  same password is accepted for scripting, but no `WWW-Authenticate` header is
-  ever sent, so browsers never pop a native dialog.
+  same password works for scripting, but no `WWW-Authenticate` is ever sent, so
+  browsers never pop a native dialog.
 - WiFi passwords are never returned by the config API. **The per-gauge WU
   upload keys are**, deliberately: `GET /config` includes them so the page can
-  populate the form (shown behind a Show toggle). They are per-station upload
-  keys rather than network credentials, and the route is already gated to the
-  SoftAP side or a signed-in LAN session. Anyone treating the configurator as
-  reachable by an untrusted party should account for that.
+  populate the form, shown behind a Show toggle. They are per-station upload
+  keys rather than network credentials, and the route is already gated.
 - **A private key is committed** in `main/certs/`, on purpose. Read
   [`main/certs/README.md`](main/certs/README.md) before concluding otherwise.
 
 ## Licensing
 
-The firmware in this repository is MIT licensed. See [LICENSE](LICENSE).
-
-Three carve-outs, none of which MIT covers:
+MIT, see [LICENSE](LICENSE). Three carve-outs it does not cover:
 
 - `managed_components/joltwallet__littlefs/` is vendored third-party code under
-  its own terms. See the `LICENSE` files inside that directory.
-- `main/net/oui_table.h` is generated from the public IEEE OUI registry by
-  `tools/gen-oui.py`.
-- The **Rainlog name and logo** (`main/ui/header_logo.h`,
-  `web/src/favicon.png`) are branding, not covered by the code license.
+  its own terms.
+- `main/net/oui_table.h` is generated from the public IEEE OUI registry.
+- The **Rainlog name and logo** (`main/ui/header_logo.h`, `tools/icon-512.png`,
+  `web/src/favicon.png`) are branding.
 
-Note also that a default build uploads readings to, and fetches firmware
-updates from, `rainlog.org`. A fork intended for another service should
-repoint `CFG_RAINLOG_HOST` and `CFG_OTA_HOST` in `main/config.example.h` (and
-so in the `main/config.h` you copy from it).
+A default build uploads to, and fetches updates from, `rainlog.org`. A fork for
+another service should repoint `CFG_RAINLOG_HOST` and `CFG_OTA_HOST` in
+`main/config.example.h`.
