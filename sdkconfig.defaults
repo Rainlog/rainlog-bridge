@@ -1,0 +1,63 @@
+# Default sdkconfig for the Rainlog Wireless Bridge.
+# Committed so a fresh checkout builds for the right target without manual
+# `idf.py set-target`. The generated `sdkconfig` is gitignored.
+
+# Target: Waveshare ESP32-C6-LCD-1.47 (RISC-V, WiFi 6).
+CONFIG_IDF_TARGET="esp32c6"
+
+# Our units are ESP32-C6FH8 with 8MB embedded flash (`esptool flash-id` reports
+# ESP32-C6FH8 + 8MB; the Waveshare spec claims 4MB). This is the 8MB build:
+# CONFIG_ESPTOOLPY_FLASHSIZE_8MB + the 8MB partitions.csv, tagged BOARD_ID
+# `esp32-c6fh8-lcd-1.47`. A 4MB ESP32-C6FH4 build flips this to _4MB and points
+# CONFIG_PARTITION_TABLE_CUSTOM_FILENAME at partitions-c6fh4.csv with its own
+# BOARD_ID - a separate image stream, since the layouts are not interchangeable.
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+
+# The C6 board exposes a native USB-CDC serial port; route console there so
+# logs appear over the same USB cable used to flash.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+
+# HTTPS to rainlog.org / Weather Underground uses the bundled CA roots (no
+# per-host cert pinning).
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
+CONFIG_ESP_TLS_USING_MBEDTLS=y
+
+# TLS memory: the C6's heap is tight (AP+STA WiFi plus the ~220KB LCD double
+# framebuffer), so the static 16KB TLS RX buffer pushed the first handshake to
+# rainlog.org over the edge: mbedtls_ssl_setup failed with
+# PSA_ERROR_INSUFFICIENT_MEMORY (-0x008D), breaking both forwarding and OTA.
+# Dynamic buffers size the TLS I/O buffers on demand and free the CA cert chain
+# after the handshake, cutting peak TLS RAM enough to fit.
+CONFIG_MBEDTLS_DYNAMIC_BUFFER=y
+
+# Custom 8MB dual-slot OTA partition table (partitions.csv). The WiFi+BLE+TLS
+# image exceeds the default 1MB app partition.
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# OTA: roll a freshly flashed image back to the previous slot automatically if
+# it fails its health check. The new image boots in the pending-verify state
+# and must call esp_ota_mark_app_valid_cancel_rollback() once healthy
+# (ota_update_mark_valid in ota_update.c), or the bootloader reverts on reset.
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+
+# Routing/NAT: forward SoftAP clients' traffic out the STA uplink (lwIP NAPT,
+# enabled on the AP netif once the uplink has an IP; see wifi_link.c). Weather
+# consoles need real internet for NTP / vendor clouds (the AcuRite refuses to
+# upload without NTP time); WU uploads are still DNS-spoofed to the bridge and
+# captured locally.
+CONFIG_LWIP_IP_FORWARD=y
+CONFIG_LWIP_IPV4_NAPT=y
+
+# More LWIP sockets (default 10): the HTTP capture/config server, the HTTPS
+# capture server, the DNS server + its proxy sockets, and the forwarder/OTA
+# TLS clients otherwise exhaust the table - the forwarder's outbound socket to
+# Rainlog failed to open ("unreachable"). 16 is the max.
+CONFIG_LWIP_MAX_SOCKETS=16
+
+# Power management: enable dynamic frequency scaling (DFS) to cut heat/power.
+# The CPU drops to a low frequency when idle and scales up under load. Light
+# sleep stays OFF (esp_pm_configure in code) because the SoftAP must remain
+# reachable for station uploads at any time.
+CONFIG_PM_ENABLE=y
+CONFIG_PM_DFS_INIT_AUTO=y

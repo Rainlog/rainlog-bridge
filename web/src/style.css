@@ -1,0 +1,317 @@
+body {
+  font-family: -apple-system, 'Segoe UI', Roboto, sans-serif;
+  background: #eef2f7;
+  color: #222;
+  margin: 0;
+  padding: 1.2em 0.8em;
+  font-size: 17px;
+}
+.card {
+  max-width: 460px;
+  margin: 0 auto;
+  background: #fff;
+  border-radius: 16px;
+  padding: 1.4em 1.4em 2em;
+  box-shadow: 0 2px 12px rgba(20, 40, 80, 0.1);
+}
+h2 {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  font-size: 1.6em;
+}
+.logo {
+  margin-right: 12px;
+}
+/* LAN-side sign-out, right-aligned in the header. */
+.signout {
+  margin-left: auto;
+  min-height: 40px;
+  padding: 0.4em 0.9em;
+  font-size: 0.55em;
+}
+h3 {
+  margin: 1.7em 0 0.3em;
+  padding-bottom: 0.3em;
+  font-size: 1.05em;
+  color: #1668c8;
+  border-bottom: 2px solid #e2e9f2;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+/* Block labels: every field name starts its own line at the left, never
+   wrapping behind a preceding button or status text. */
+label {
+  display: block;
+  margin: 1em 0 0.35em;
+  font-weight: 600;
+  font-size: 1em;
+}
+/* Touch-friendly fields: tall hit targets, generous padding. */
+input,
+select {
+  display: block;
+  width: 100%;
+  min-height: 52px;
+  padding: 0.7em 0.8em;
+  border: 1px solid #c6cfd9;
+  border-radius: 10px;
+  box-sizing: border-box;
+  font-size: 1.05em;
+  background: #fafcfe;
+}
+input:focus,
+select:focus {
+  outline: none;
+  border-color: #1668c8;
+  box-shadow: 0 0 0 3px rgba(22, 104, 200, 0.18);
+}
+[hidden] {
+  display: none;
+}
+/* SSID combobox: one field you can type into, with a chevron on the right that
+   drops the scanned-network list (a real <select> overlaid on the input edge,
+   since datalist popups don't open in Android's captive-portal browser). */
+.combo {
+  position: relative;
+}
+.combo input {
+  padding-right: 3.4em;
+}
+.combo select {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 3.2em;
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+  border: none;
+  border-left: 1px solid #c6cfd9;
+  border-radius: 0 10px 10px 0;
+  /* Drop the native chevron and draw our own, so there's exactly one. The
+     closed box shows only the chevron (text transparent); the dropdown list
+     keeps normal text via the option rule below. */
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  color: transparent;
+  cursor: pointer;
+  background: #eaf1fb
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14'%3E%3Cpath d='M3 5l4 4 4-4' fill='none' stroke='%231668c8' stroke-width='2'/%3E%3C/svg%3E")
+    no-repeat center;
+}
+.combo select option {
+  color: #222;
+}
+/* Password field with a Show/Hide toggle on the right edge. */
+.pw {
+  position: relative;
+}
+.pw input {
+  padding-right: 4.6em;
+}
+.pw .toggle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 4.4em;
+  height: 100%;
+  min-height: 0;
+  border: none;
+  border-left: 1px solid #c6cfd9;
+  border-radius: 0 10px 10px 0;
+  background: #eef2f7;
+  color: #1668c8;
+  font-size: 0.95em;
+  font-weight: 600;
+  cursor: pointer;
+}
+.wurow .pw {
+  margin: 0.4em 0;
+}
+.wurow .pw input {
+  margin: 0;
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: 0.7em;
+  margin: 0.7em 0 0.2em;
+  flex-wrap: wrap;
+}
+button {
+  min-height: 52px;
+  font-size: 1.05em;
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+}
+button[type='submit'] {
+  display: block;
+  width: 100%;
+  margin-top: 1.8em;
+  padding: 1em;
+  font-size: 1.15em;
+  background: #1668c8;
+  color: #fff;
+  font-weight: 600;
+}
+button[type='submit']:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.err {
+  margin: 0.1em 0 0.2em;
+  min-height: 1.1em;
+  color: #c0392b;
+  font-size: 0.85em;
+}
+.mini {
+  min-height: 48px;
+  padding: 0.65em 1.2em;
+  background: #e8eff8;
+  color: #1668c8;
+  font-weight: 600;
+}
+.mini:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.hint {
+  margin: 0.3em 0 0.7em;
+  color: #667;
+  font-size: 0.9em;
+}
+.wurow {
+  border: 1px solid #dbe3ec;
+  border-radius: 12px;
+  padding: 0.9em;
+  margin-bottom: 0.9em;
+  background: #f7fafd;
+}
+.wurow input {
+  margin: 0.4em 0;
+}
+.fwdarrow {
+  text-align: center;
+  color: #1668c8;
+  font-size: 1.3em;
+  line-height: 1;
+}
+.rm {
+  min-height: 44px;
+  margin-top: 0.4em;
+  padding: 0.5em 1.1em;
+  background: #fbeaea;
+  color: #c0392b;
+  font-size: 0.95em;
+}
+.small {
+  color: #667;
+  font-size: 0.95em;
+}
+#tstat {
+  margin: 0.4em 0 0.2em;
+  min-height: 1.3em;
+  font-size: 1em;
+}
+/* Tab bar under the page header. */
+.tabs {
+  display: flex;
+  gap: 0.5em;
+  margin: 1.1em 0 0;
+  border-bottom: 2px solid #e2e9f2;
+}
+.tab {
+  min-height: 44px;
+  padding: 0.4em 1.2em;
+  background: none;
+  color: #667;
+  font-weight: 600;
+  border-radius: 10px 10px 0 0;
+}
+.tab.active {
+  color: #1668c8;
+  background: #e8eff8;
+}
+/* Update-available warning triangle on the Firmware tab. */
+.warn {
+  margin-left: 0.35em;
+  color: #d97706;
+}
+/* Devices tab: one card per SoftAP client. */
+.dev {
+  border: 1px solid #dbe3ec;
+  border-radius: 12px;
+  padding: 0.9em;
+  margin: 0.9em 0;
+  background: #f7fafd;
+}
+.devmain {
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+}
+.dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #c6cfd9;
+  flex: none;
+}
+.dot.on {
+  background: #2eaf5d;
+}
+.bars {
+  color: #1668c8;
+  letter-spacing: 1px;
+}
+.you {
+  padding: 0.15em 0.55em;
+  background: #eef2f7;
+  border-radius: 6px;
+  color: #667;
+  font-size: 0.8em;
+}
+.devsub {
+  margin-top: 0.35em;
+  overflow-wrap: anywhere;
+}
+.deverr {
+  padding: 0.15em 0.55em;
+  background: #fdecea;
+  border-radius: 6px;
+  color: #c0392b;
+}
+.devwarn {
+  padding: 0.15em 0.55em;
+  background: #fdf3e0;
+  border-radius: 6px;
+  color: #9a6700;
+}
+a.open {
+  display: inline-block;
+  padding: 0.7em 1.5em;
+  box-sizing: border-box;
+  text-decoration: none;
+  line-height: 1.2;
+  /* An <a>, so it misses the button {} rounding the other .mini buttons get. */
+  border-radius: 10px;
+}
+.spin {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  border: 3px solid #ccc;
+  border-top-color: #1668c8;
+  border-radius: 50%;
+  animation: sp 1s linear infinite;
+  vertical-align: middle;
+  margin-right: 7px;
+}
+@keyframes sp {
+  to {
+    transform: rotate(360deg);
+  }
+}

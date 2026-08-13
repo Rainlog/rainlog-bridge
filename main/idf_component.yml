@@ -1,0 +1,10 @@
+# Managed component dependencies (ESP-IDF component manager).
+#
+# LittleFS (power-loss-resilient, wear-leveled filesystem) for the `storage`
+# partition - holds the upload-stats file across reboots. Not in core ESP-IDF.
+#
+# managed_components/ and dependencies.lock are COMMITTED so the Docker build
+# stays offline/reproducible (same rationale as the committed generated files);
+# only the first fetch needs network.
+dependencies:
+  joltwallet/littlefs: "^1.14"

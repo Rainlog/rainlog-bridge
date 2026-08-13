@@ -1,0 +1,48 @@
+name: build
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  firmware:
+    runs-on: ubuntu-latest
+    # Same image the local ./build.sh pins, so CI and a developer machine
+    # compile the identical toolchain. managed_components/ is committed and
+    # dependencies.lock pins the rest, so this needs no network at build time.
+    container: espressif/idf:v6.0.1
+    steps:
+      - uses: actions/checkout@v4
+
+      # config.h is gitignored (it holds local WiFi/PWS secrets). The example
+      # is the committed template and is sufficient to compile: everything
+      # user-facing is provisioned at runtime, not baked in.
+      - name: Seed config.h from the template
+        run: cp main/config.example.h main/config.h
+
+      - name: Build
+        shell: bash
+        run: . $IDF_PATH/export.sh && idf.py build
+
+  # The firmware embeds main/web/index.html as a committed generated file, so a
+  # stale commit would ship a page that does not match web/src/. Rebuild it and
+  # fail if the result differs.
+  web-artifact-is-current:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Rebuild the embedded config page
+        working-directory: web
+        run: npm ci && npm run build
+
+      - name: Fail if main/web/index.html is out of date
+        run: git diff --exit-code -- main/web/index.html

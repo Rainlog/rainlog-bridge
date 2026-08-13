@@ -1,0 +1,19 @@
+{
+  "name": "rainlog-bridge-web",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Config web UI for the Rainlog Wireless Bridge. Builds the TypeScript + CSS + favicon into one self-contained, minified main/web/index.html that the firmware embeds.",
+  "type": "module",
+  "scripts": {
+    "build": "tsc --noEmit && node build.mjs",
+    "typecheck": "tsc --noEmit",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "devDependencies": {
+    "esbuild": "^0.21.5",
+    "html-minifier-terser": "^7.2.0",
+    "prettier": "^3.3.2",
+    "typescript": "^5.4.5"
+  }
+}

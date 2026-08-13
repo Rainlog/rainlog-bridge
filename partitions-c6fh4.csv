@@ -1,0 +1,12 @@
+# Rainlog Wireless Bridge partition table - ESP32-C6FH4 (4MB) variant.
+# NOT the default; selected only for a 4MB build (set
+# CONFIG_PARTITION_TABLE_CUSTOM_FILENAME to this, CONFIG_ESPTOOLPY_FLASHSIZE_4MB,
+# and a `...-c6fh4` BOARD_ID). Dual ~2MB OTA slots (0x1F0000 = 1.9375MB, ~600KB
+# headroom over the 1.32MB image), no spiffs reserve, summing to 4MB. No 4MB
+# hardware on hand yet, so this is staged for when an ESP32-C6FH4 board lands.
+# Name,     Type, SubType,  Offset, Size
+nvs,        data, nvs,      ,       0x6000,
+otadata,    data, ota,      ,       0x2000,
+phy_init,   data, phy,      ,       0x1000,
+ota_0,      app,  ota_0,    ,       0x1F0000,
+ota_1,      app,  ota_1,    ,       0x1F0000,

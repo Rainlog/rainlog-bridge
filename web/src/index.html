@@ -1,0 +1,53 @@
+<!doctype html><html lang=en><head><meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1">
+<title>Rainlog Bridge Setup</title>
+<link rel=icon type=image/png href=./favicon.png>
+<link rel=stylesheet href=./style.css>
+</head><body>
+<div class=card>
+<h2><img src=./favicon.png width=32 height=32 class=logo alt="">Rainlog Bridge<button type=button id=signOut class="mini signout" hidden>Sign out</button></h2>
+<nav class=tabs>
+<button type=button class="tab active" data-view=viewSetup>Setup</button>
+<button type=button class=tab data-view=viewDevices>Devices</button>
+<button type=button class=tab data-view=viewFirmware>Firmware<span id=fwWarn class=warn hidden>&#9888;&#xfe0e;</span></button>
+</nav>
+<div id=viewSetup>
+<form method=POST action=/save id=form>
+<h3>Home Wi-Fi</h3>
+<label>Network name</label>
+<div class=combo>
+<input name=sta_ssid autocomplete=off placeholder="Your home Wi-Fi name">
+<select id=nets aria-label="Pick a scanned network"></select>
+</div>
+<div class=row><button type=button id=scanBtn class=mini>Scan networks</button><span id=sstat class=small></span></div>
+<label>Password</label>
+<input name=sta_pass type=password placeholder="(unchanged)">
+<div class=row><button type=button id=testBtn class=mini>Test connection</button></div>
+<div id=tstat></div>
+<h3>Bridge Wi-Fi</h3>
+<label>Network name (this device)</label>
+<input name=ap_ssid placeholder="Network name">
+<label>Password</label>
+<input name=ap_pass type=password placeholder="(unchanged)">
+<p class=hint>Also unlocks this page from your home network: browse to the bridge's Home IP (shown on its screen) and sign in with this password.</p>
+<h3>Weather Underground</h3>
+<p class=hint>Optional. Relay each gauge to a Weather Underground station. The console keeps sending its Rainlog credentials; the bridge maps the Rainlog station ID to these WU credentials.</p>
+<div id=wuRows></div>
+<button type=button id=addBtn class=mini>Add forward</button>
+<button type=submit>Save &amp; reboot bridge</button>
+</form>
+</div>
+<div id=viewFirmware hidden>
+<h3>Firmware</h3>
+<p id=otaStat class=small></p>
+<div class=row><button type=button id=otaCheckBtn class=mini>Check for updates</button><button type=button id=otaApplyBtn class=mini hidden>Update now</button></div>
+</div>
+<div id=viewDevices hidden>
+<h3>Connected devices</h3>
+<p class=hint>Devices on the bridge's Wi-Fi. Open visits a device's own page (your weather station's settings live there).</p>
+<div id=devList></div>
+<p id=devEmpty class=small hidden></p>
+</div>
+</div>
+<script type=module src=./app.ts></script>
+</body></html>

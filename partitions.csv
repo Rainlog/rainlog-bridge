@@ -1,0 +1,16 @@
+# Rainlog Wireless Bridge partition table - ESP32-C6FH8 (8MB) variant.
+# This is the build's default table (CONFIG_PARTITION_TABLE_CUSTOM_FILENAME).
+# The 4MB ESP32-C6FH4 variant uses partitions-c6fh4.csv instead; each flash
+# size is its own BOARD_ID + image stream (see board.h), since the layouts are
+# not interchangeable. Offsets blank so the gen tool auto-places + 64KB-aligns
+# the app partitions. Sizes sum to 8MB. See README.md (OTA).
+# Name,     Type, SubType,  Offset, Size
+nvs,        data, nvs,      ,       0x6000,
+otadata,    data, ota,      ,       0x2000,
+phy_init,   data, phy,      ,       0x1000,
+ota_0,      app,  ota_0,    ,       0x300000,
+ota_1,      app,  ota_1,    ,       0x300000,
+# `storage` holds a LittleFS image (mounted by fs.c) for the upload-stats file.
+# Subtype stays `spiffs`: esp_littlefs finds the partition by label regardless
+# of subtype, and the partition tool may not know a `littlefs` subtype.
+storage,    data, spiffs,   ,       0x1E0000,

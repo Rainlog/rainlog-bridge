@@ -1,0 +1,9 @@
+# Style for the firmware C sources (main/). Google base: 2-space indent, 80
+# columns, attached braces, always-braced multi-line blocks. Overrides:
+# pointers bind to the name (char *p), which the codebase uses throughout.
+Language: Cpp
+BasedOnStyle: Google
+IndentWidth: 2
+ColumnLimit: 80
+PointerAlignment: Right
+DerivePointerAlignment: false

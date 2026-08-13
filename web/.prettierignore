@@ -1,0 +1,6 @@
+node_modules/
+package-lock.json
+src/favicon.png
+# The HTML template is the shell that becomes the minified main/web/index.html;
+# the build splices the (prettier-formatted) CSS/JS into it. Leave it as-is.
+src/index.html
