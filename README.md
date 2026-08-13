@@ -3,25 +3,43 @@
 ESP32-C6 firmware that lets an existing personal weather station report rain to
 [Rainlog.org](https://rainlog.org) without replacing the station.
 
-Most consumer weather station consoles can upload to Weather Underground and
-nowhere else. This device stands in for Weather Underground: the console
+Some consoles can only upload to Weather Underground, with no way to enter a
+custom server. This device stands in for Weather Underground: the console
 uploads to the bridge believing it is talking to WU, and the bridge forwards
-the reading to Rainlog, then relays it on to the real Weather Underground so
-your existing WU station keeps working.
+the reading to Rainlog. It can also relay to the real Weather Underground, so
+an existing WU station keeps working, once you configure that.
 
 Your console needs no firmware change and no vendor cooperation. It only needs
 to be pointed at the bridge's WiFi.
+
+## Do you need one?
+
+**Probably not.** If your station can upload to a custom server (usually a
+"Customized" upload setting where you can type a hostname), point it straight
+at rainlog.org instead. That is simpler, has nothing extra to power, and is
+what Rainlog's own [PWS setup guide](https://rainlog.org/help/pws-setup)
+recommends. Rainlog accepts both the Weather Underground and Ecowitt upload
+protocols directly.
+
+This bridge is for stations that **cannot** enter a custom server at all, such
+as the AcuRite Iris, where uploading to Weather Underground is the only option
+the console offers.
+
+It is also still in beta. If you want to try one, email Rainlog first.
 
 ## Setting up your bridge
 
 **1. Get your station credentials from Rainlog.**
 
-On [rainlog.org](https://rainlog.org), set your gauge's reporting mode to
-**Automatic**, then open the gauge and click **View station credentials**.
-Keep the **Weather Underground** tab selected and note two values:
+On [rainlog.org](https://rainlog.org), go to **Data > View/Edit Gauges**, edit
+your gauge, set its reporting mode to **Automatic**, and **save**. The next
+step does not appear until you have saved.
+
+Back on the gauges list, the gauge now shows a small **key icon**. Click it.
+With **Weather Underground** selected, note two values:
 
 - **Station ID**, which looks like `Rainlog12345`
-- **Station key**
+- **Station Key**
 
 **2. Power on the bridge.**
 
@@ -32,12 +50,18 @@ The screen shows a setup message with the bridge's own WiFi name and password.
 Join the bridge's WiFi from a phone or laptop. A setup page should open by
 itself; if it does not, browse to `http://10.41.0.1`.
 
-Pick your home network from the list and enter its password. There is a Test
-button that checks the password before you commit to it. Save, and the bridge
-restarts and shows its status screen.
+Pick your home network from the list and enter its password. **Scan networks**
+refreshes the list if it is empty, and you can also just type the name.
+**Test connection** checks the password before you commit to it.
 
-While you are here, set a new password for the bridge's own WiFi. It must be at
-least 8 characters, and the default is rejected.
+You must also **set a new password for the bridge's own WiFi**. This is
+required, not optional: it must be at least 8 characters, the default is
+rejected, and the bridge will not save until you change it. **Write it down**,
+because you need it in the next step and the status screen never shows it
+again.
+
+Then **Save & reboot bridge**. The bridge restarts and shows its status
+screen.
 
 **4. Point your weather station at the bridge.**
 
@@ -49,18 +73,30 @@ set:
 
 Then join the console to the **bridge's** WiFi instead of your home WiFi.
 
-Leave the protocol set to Weather Underground. Some consoles offer an
-"Ecowitt" or "Customized" mode; those upload a different way and the bridge
-will not see them.
+Set the **protocol to Weather Underground** (sometimes called Wunderground).
+If your console calls this a "Customized" upload, that is fine and expected,
+just keep the protocol set to Weather Underground.
+
+Do **not** select the Ecowitt protocol. The bridge only captures Weather
+Underground uploads. (Rainlog itself accepts Ecowitt, but only for stations
+uploading to it directly, which do not need a bridge.)
 
 **5. Check that it works.**
 
-Wait for your console's next upload (typically well under 5 minutes). The
-bridge's screen shows a Forwarding count that ticks up, and the LED pulses
-green on each successful forward. Your readings then appear on rainlog.org.
+Wait for your console's next upload. The bridge's screen has a **Forwarding**
+section whose count rises, and the LED pulses green on each forward. Your
+readings then appear on rainlog.org.
 
-If you also want to keep uploading to Weather Underground, enter your WU
-station ID and key on the bridge's setup page and it will relay there too.
+Do not expect that count to move on every upload. Rainlog accepts one reading
+per gauge per 5 minutes, so the bridge throttles undated uploads to match. A
+console that reports every 18 seconds will show its received count climbing
+steadily while the forwarded count rises only once per 5 minutes. That is
+working correctly.
+
+To keep uploading to Weather Underground as well, add a relay row on the setup
+page. It needs **three** values: your Rainlog station ID (`Rainlog12345`), your
+WU station ID, and your WU key. A row missing any of them is silently ignored,
+so double check all three.
 
 ### If something is wrong
 
@@ -68,6 +104,8 @@ The bridge's screen lists your home WiFi, its own WiFi, and per-device counts,
 which is usually enough to tell where a problem is. The setup page's Devices
 tab shows each connected station with any error reason.
 
+- **LED dark**: normal. The LED is off during healthy operation and only
+  pulses green on a forward.
 - **LED solid red**: an error. Check the screen.
 - **LED blue**: not yet set up, or still connecting.
 - **Nothing forwarding**: confirm the console joined the *bridge's* WiFi and
@@ -89,14 +127,18 @@ The bridge runs its own access point and joins your home WiFi at the same time,
 on one radio.
 
 - **Bridge side** (`10.41.0.1/24`, WPA2): your console joins this. The subnet is
-  deliberately off the common home ranges so it cannot collide with your LAN.
+  deliberately off the common home ranges so an overlap with your LAN is very
+  unlikely. Nothing detects one, so a home LAN actually on `10.41.0.0/24` would
+  misroute the bridge's uplink.
 - **Home side**: the bridge's uplink to the internet.
 
 Uploads are captured by impersonating Weather Underground on the bridge side:
 
 1. `net/dns_server.c` (UDP :53) answers `*.wunderground.com` with the bridge's
-   own address and proxies everything else to the real resolver. While
-   unprovisioned it answers all names, making a full captive portal.
+   own address, and does the same for a fixed list of OS connectivity-check
+   hosts so the setup page pops up as a captive portal. That list stays active
+   even once provisioned. Everything else is proxied to the real resolver,
+   except while unprovisioned, when it answers all names.
 2. `net/capture_server.c` serves `/weatherstation/updateweatherstation.php` on
    ports 80 and 443. Some consoles (AcuRite) insist on TLS, hence the HTTPS
    listener with a self-signed certificate. See
@@ -104,16 +146,25 @@ Uploads are captured by impersonating Weather Underground on the bridge side:
    committed here on purpose.
 3. It answers `success` immediately and queues the raw query, so a slow uplink
    never stalls the console.
-4. `forward/forwarder.c` sends the reading to Rainlog unchanged, and relays to
-   the real WU with the ID and password rewritten when a mapping is set.
+4. `forward/forwarder.c` sends the reading to Rainlog, appending an
+   `rlbridge=<version>` marker, and relays to the real WU with the ID and
+   password rewritten when a mapping is configured. Readings timestamped `now`
+   are throttled to one per gauge per 305 s to stay inside Rainlog's limit;
+   intermediate ones are dropped rather than buffered. Readings carrying a real
+   timestamp are never throttled, and the WU relay is never throttled.
 
 The bridge also NATs for its clients, so the console gets real internet for NTP
 and vendor services. Some consoles refuse to upload until their clock syncs.
 
-Readings survive a flaky uplink: the forwarder keeps a store-and-forward retry
-buffer mirrored to flash, so a reboot, an update, or a crash does not drop an
+Readings mostly survive a flaky uplink: the forwarder keeps a store-and-forward
+retry buffer mirrored to flash, so a reboot or an update does not drop an
 undelivered reading. It drains newest-first, because the WU protocol's rain
 fields are cumulative and the freshest reading already carries the full total.
+
+The buffer is bounded rather than unlimited, and discards on purpose: 24
+entries (oldest evicted first), 30 delivery attempts, and a 6 hour age cap. The
+flash mirror is also throttled to one write per 15 s, so a crash inside that
+window loses whatever changed since the last write.
 
 ## Hardware
 
@@ -188,8 +239,9 @@ for working ST7789, WS2812, SPI, and SD init sequences.
 
 ## Firmware updates (OTA)
 
-The bridge checks shortly after its uplink comes up, then every 12 to 24 hours
-(randomized). Updates stream into the inactive slot, are verified against the
+The bridge checks 2 seconds after its uplink comes up, then backs off by
+doubling after each check until it settles at a randomized 12 to 24 hour
+interval (roughly a day of uptime to get there). Updates stream into the inactive slot, are verified against the
 manifest's sha256 before commit, and reboot. Rollback is enabled: the image is
 marked valid only about 20 seconds after a good boot, so an update that
 crash-loops reverts itself.
@@ -204,7 +256,8 @@ To cut a release:
 
 Filenames are versioned and immutable. The firmware fetches
 `manifest-<its own BOARD_ID>.json` and rejects a manifest whose `board` does
-not match.
+not match. A manifest with no `board` field at all is accepted, for
+compatibility with pre-board releases.
 
 **OTA replaces the app only.** The bootloader and partition table are not
 touched, so a partition layout change cannot ship over the air and requires a
@@ -223,9 +276,13 @@ deliberately out of scope, since none are useful without burning eFuses.
   or the internet can inject a reading.
 - The configurator uses one secret, the bridge's own WiFi password. From the
   LAN it requires a sign-in that sets a RAM-only session cookie, so a reboot
-  signs everyone out. Failed logins are throttled. HTTP Basic auth with the
-  same password works for scripting, but no `WWW-Authenticate` is ever sent, so
-  browsers never pop a native dialog.
+  signs everyone out. HTTP Basic auth with the same password works for
+  scripting, and no `WWW-Authenticate` is ever sent, so browsers never pop a
+  native dialog.
+- **Only the sign-in form throttles failed attempts** (1 s penalty). The Basic
+  auth path has no throttle, so password guessing against it from the LAN runs
+  at full speed. Since a correct guess returns the WU upload keys, treat the
+  bridge WiFi password as the real boundary and make it a good one.
 - WiFi passwords are never returned by the config API. **The per-gauge WU
   upload keys are**, deliberately: `GET /config` includes them so the page can
   populate the form, shown behind a Show toggle. They are per-station upload
