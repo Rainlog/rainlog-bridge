@@ -15,7 +15,10 @@ npm run typecheck
 
 `build.mjs` bundles + minifies `src/app.ts` (esbuild), minifies `src/style.css`,
 inlines the favicon as a `data:` URI, splices all three into `src/index.html`,
-and minifies the document.
+and minifies the document. It then writes `index.html.gz` beside each HTML
+page using Zopfli with 100 iterations and checks decompression matches exactly.
+The firmware embeds the gzip file and serves it with `Content-Encoding: gzip`.
+Compression runs only during the Node build, not on the ESP32.
 
 ## Why a single static file
 
@@ -24,7 +27,7 @@ fetches current settings from the firmware's `/config` JSON endpoint at load and
 fills the form client-side. Wi-Fi passwords are not returned. Authenticated requests receive saved WU
 keys and radio Rainlog PWS keys for editing behind Show/Hide controls.
 
-Both generated pages are **committed**: the firmware build runs in the
+Both generated pages and their gzip files are **committed**: the firmware build runs in the
 pinned ESP-IDF Docker image, which has no Node. Re-run `npm run build` and commit
 the regenerated files whenever you change anything under `src/`.
 
@@ -63,3 +66,37 @@ not get this replacement action.
 Sensor cards embed original matching SVG drawings from `src/icons/`: a
 tipping-bucket collector for TX5U and a weather-station mast for Iris. Esbuild
 loads these as text, so no separate asset requests or icon library are needed.
+
+At least one reception source must remain enabled: the last enabled checkbox
+cannot be unchecked. Firmware validation also rejects both sources off,
+including console settings. Radio-free builds omit both reception switches
+and always use Wi-Fi interception. Older saved configurations with both off
+resume radio reception on boot.
+
+## Manual firmware update
+
+Firmware offers a Manual update section for a trusted app `.bin` for this exact
+board. The browser previews version, board and size; the device repeats the
+checks. Files need the fixed-offset Rainlog board descriptor added by current
+builds, so rebuild older images first. Merged flash images and bootloaders are
+rejected. Manual installs can use the same version or downgrade.
+
+The authenticated binary POST `/ota/upload` requires `X-Rainlog-OTA: 1` and
+`Content-Type: application/octet-stream`. Streaming uses a 1 KiB buffer, writes
+only the inactive OTA slot, and rejects interrupted uploads, wrong identity,
+slot overflow, missing SHA-256 hashes, corrupt images and trailing data. A
+shared operation lock excludes concurrent manual/server updates. Only successful
+ESP-IDF image validation selects the boot slot and schedules reboot. The existing
+20-second boot health check cancels automatic rollback after startup succeeds.
+Browser cancellation is offered while bytes are uploading, before validation.
+
+`tests/test-firmware-image.sh` checks header and identity rejection. Optional
+arguments validate the real LILYGO app image and reject the real C6 image.
+`tests/test-manual-ota.py SERIAL LILYGO_APP_BIN C6_APP_BIN` performs destructive
+OTA-slot tests only on the selected LILYGO debug board, ending with a valid
+manual install and boot health check. It retains provisioning and mappings.
+
+Setup, Devices and Firmware use `/setup`, `/devices` and `/firmware` routes.
+Tab navigation preserves unsaved fields and supports browser history and direct
+links. The firmware serves the authenticated app shell at each route; `/` opens
+Setup.

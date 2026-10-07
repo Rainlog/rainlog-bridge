@@ -76,9 +76,9 @@ void app_main(void) {
   time_sync_start();
   if (config_wifi_interception_enabled()) dns_server_start();
   forwarder_init();
+  ota_update_start();  // initialize OTA locks before exposing HTTP routes
   capture_server_start();
   config_server_start();
-  ota_update_start();
   radio_start();
   debug_console_start();
 

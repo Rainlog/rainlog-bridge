@@ -4,12 +4,15 @@
 //   2. minify src/style.css        (esbuild css transform)
 //   3. inline the favicon as a data URI
 //   4. splice all three into src/index.html, then minify the whole document
+//   5. gzip each page with 100 Zopfli iterations for firmware embedding
 //
 // The generated file is committed so the Docker ESP-IDF build never needs Node;
 // re-run `npm run build` here whenever the src/ files change.
 
 import { build, transform } from 'esbuild';
 import { minify } from 'html-minifier-terser';
+import { gzipAsync } from '@gfx/zopfli';
+import { gunzipSync } from 'node:zlib';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -90,6 +93,11 @@ for (const radioMHz of [0, 433]) {
   });
 
   mkdirSync(dirname(outFile), { recursive: true });
-  writeFileSync(outFile, html + '\n');
-  console.log(`wrote ${outFile} (${Buffer.byteLength(html)} bytes)`);
+  const page = Buffer.from(html + '\n');
+  const compressed = await gzipAsync(page, { numiterations: 100 });
+  if (!gunzipSync(compressed).equals(page))
+    throw new Error(`build: gzip round-trip failed for ${outFile}`);
+  writeFileSync(outFile, page);
+  writeFileSync(outFile + '.gz', compressed);
+  console.log(`wrote ${outFile} (${page.length} bytes, ${compressed.length} gzip bytes, 100 Zopfli iterations)`);
 }

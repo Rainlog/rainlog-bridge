@@ -6,6 +6,8 @@
 #include <strings.h>
 
 #include "board.h"
+#include "firmware_image.h"
+#include "esp_image_format.h"
 #include "config_store.h"
 #include "esp_app_desc.h"
 #include "esp_crt_bundle.h"
@@ -62,6 +64,14 @@ static struct {
   char error[64];   // last error message (PHASE_ERROR)
 } s_ota;
 
+const firmware_identity_t rainlog_firmware_identity
+    __attribute__((section(".rodata_custom_desc"), used)) = {
+        .magic = {'R', 'L', 'O', 'G', 'O', 'T', 'A', '1'}, .board = BOARD_ID};
+_Static_assert(FIRMWARE_PREFIX_SIZE == sizeof(esp_image_header_t) +
+                   sizeof(esp_image_segment_header_t) + sizeof(esp_app_desc_t) +
+                   sizeof(firmware_identity_t), "Firmware prefix layout changed");
+
+static SemaphoreHandle_t s_operation;
 static SemaphoreHandle_t s_lock;
 static TaskHandle_t s_task;
 
@@ -371,14 +381,23 @@ static void ota_task(void *arg) {
       // On-demand from the web UI. Apply implies a fresh check inside do_apply.
       if (cmd & CMD_APPLY) {
         wait_for_uplink();
-        do_apply();
+        if (xSemaphoreTake(s_operation, 0) == pdTRUE) {
+          do_apply();
+          xSemaphoreGive(s_operation);
+        }
       } else if (cmd & CMD_CHECK) {
         wait_for_uplink();
-        do_check();
+        if (xSemaphoreTake(s_operation, 0) == pdTRUE) {
+          do_check();
+          xSemaphoreGive(s_operation);
+        }
       }
     } else if (wifi_link_sta_has_ip()) {
       // Backoff timeout elapsed.
-      do_check();
+      if (xSemaphoreTake(s_operation, 0) == pdTRUE) {
+        do_check();
+        xSemaphoreGive(s_operation);
+      }
     }
 
     // Double the interval, capped at a freshly drawn 12-24h value (re-drawn
@@ -398,6 +417,8 @@ void ota_update_start(void) {
     return;
   }
   s_lock = xSemaphoreCreateMutex();
+  s_operation = xSemaphoreCreateMutex();
+  configASSERT(s_lock && s_operation);
   snprintf(s_ota.latest, sizeof(s_ota.latest), "%s", "");
   // The OTA path runs the TLS handshake + esp_https_ota inline; give it a roomy
   // stack like the forwarder's.
@@ -442,12 +463,19 @@ void ota_update_status_json(char *out, size_t len) {
   static const char *const names[] = {"idle",      "checking", "uptodate",
                                       "available", "updating", "error"};
   const char *running = esp_app_get_description()->version;
+  const esp_partition_t *slot = esp_ota_get_next_update_partition(NULL);
+  const esp_partition_t *boot = esp_ota_get_boot_partition();
+  const esp_partition_t *active = esp_ota_get_running_partition();
+  esp_ota_img_states_t state;
+  bool pending = esp_ota_get_state_partition(active, &state) == ESP_OK &&
+                 state == ESP_OTA_IMG_PENDING_VERIFY;
   xSemaphoreTake(s_lock, portMAX_DELAY);
   snprintf(out, len,
            "{\"phase\":\"%s\",\"running\":\"%.12s\",\"latest\":\"%s\","
-           "\"available\":%s,\"progress\":%d,\"error\":\"%s\"}",
+           "\"available\":%s,\"progress\":%d,\"error\":\"%s\",\"board\":\"%s\",\"max_image_size\":%lu,\"running_slot\":\"%s\",\"boot_slot\":\"%s\",\"pending_verification\":%s}",
            names[s_ota.phase], running, s_ota.latest,
-           s_ota.available ? "true" : "false", s_ota.progress, s_ota.error);
+           s_ota.available ? "true" : "false", s_ota.progress, s_ota.error, BOARD_ID,
+           (unsigned long)(slot ? slot->size : 0), active->label, boot ? boot->label : "", pending ? "true" : "false");
   xSemaphoreGive(s_lock);
 }
 
@@ -460,4 +488,104 @@ void ota_update_mark_valid(void) {
       ESP_LOGI(TAG, "OTA image marked valid (rollback cancelled)");
     }
   }
+}
+
+struct ota_manual {
+  esp_ota_handle_t handle;
+  const esp_partition_t *partition;
+  size_t expected, written;
+};
+
+esp_err_t ota_manual_begin(const uint8_t *prefix, size_t prefix_size,
+                           size_t image_size, ota_manual_t **upload,
+                           const char **error) {
+  *upload = NULL;
+  if (!s_operation || xSemaphoreTake(s_operation, 0) != pdTRUE) {
+    *error = "Another firmware operation is in progress";
+    return ESP_ERR_INVALID_STATE;
+  }
+  const esp_partition_t *slot = esp_ota_get_next_update_partition(NULL);
+  const esp_partition_t *running = esp_ota_get_running_partition();
+  esp_image_header_t header;
+  char version[32];
+  if (!slot || slot->address == running->address ||
+      esp_partition_read(running, 0, &header, sizeof(header)) != ESP_OK) {
+    *error = "No safe inactive update slot";
+    xSemaphoreGive(s_operation);
+    return ESP_ERR_INVALID_STATE;
+  }
+  *error = firmware_image_validate(prefix, prefix_size, image_size, slot->size,
+                                  BOARD_ID, header.chip_id, header.spi_size,
+                                  version);
+  if (*error) {
+    xSemaphoreGive(s_operation);
+    return ESP_ERR_INVALID_ARG;
+  }
+  ota_manual_t *u = calloc(1, sizeof(*u));
+  if (!u) {
+    *error = "Not enough memory for update";
+    xSemaphoreGive(s_operation);
+    return ESP_ERR_NO_MEM;
+  }
+  u->partition = slot;
+  u->expected = image_size;
+  esp_err_t err = esp_ota_begin(slot, image_size, &u->handle);
+  if (err != ESP_OK) {
+    *error = "Cannot start update; wait for the running firmware health check";
+    free(u);
+    xSemaphoreGive(s_operation);
+    return err;
+  }
+  xSemaphoreTake(s_lock, portMAX_DELAY);
+  s_ota.phase = PHASE_UPDATING;
+  s_ota.progress = 0;
+  s_ota.error[0] = 0;
+  snprintf(s_ota.latest, sizeof(s_ota.latest), "%.23s", version);
+  xSemaphoreGive(s_lock);
+  *upload = u;
+  return ESP_OK;
+}
+
+esp_err_t ota_manual_write(ota_manual_t *u, const uint8_t *data, size_t len) {
+  if (len > u->expected - u->written) return ESP_ERR_INVALID_SIZE;
+  esp_err_t err = esp_ota_write(u->handle, data, len);
+  if (err == ESP_OK) {
+    u->written += len;
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    s_ota.progress = (int)(u->written * 100 / u->expected);
+    xSemaphoreGive(s_lock);
+  }
+  return err;
+}
+
+void ota_manual_abort(ota_manual_t *u) {
+  if (u->handle) esp_ota_abort(u->handle);
+  free(u);
+  set_error("Manual upload failed; current firmware retained");
+  xSemaphoreGive(s_operation);
+}
+
+esp_err_t ota_manual_finish(ota_manual_t *u, const char **error) {
+  esp_err_t err = ESP_ERR_INVALID_SIZE;
+  if (u->written == u->expected) {
+    err = esp_ota_end(u->handle);
+    u->handle = 0;  // esp_ota_end releases the handle even on failure.
+  }
+  if (err == ESP_OK) {
+    esp_image_metadata_t image;
+    esp_partition_pos_t pos = {.offset = u->partition->address,
+                               .size = u->partition->size};
+    err = esp_image_verify(ESP_IMAGE_VERIFY_SILENT, &pos, &image);
+    if (err == ESP_OK && image.image_len != u->expected)
+      err = ESP_ERR_INVALID_SIZE;
+  }
+  if (err == ESP_OK) err = esp_ota_set_boot_partition(u->partition);
+  if (err != ESP_OK) {
+    *error = "Image verification failed; current firmware retained";
+    ota_manual_abort(u);
+    return err;
+  }
+  free(u);
+  // Keep the operation lock until reboot so no second update can replace it.
+  return ESP_OK;
 }

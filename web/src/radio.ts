@@ -318,7 +318,7 @@ export function createRadio(
         const button = document.createElement('button');
         button.type = 'button';
         button.className = 'mini mapping-action';
-        button.textContent = 'Add mapping';
+        button.textContent = 'Add Rainlog mapping';
         button.addEventListener('click', () =>
           addRow({ ...sensor, gauge_id: 0, rainlog_key: '' }),
         );

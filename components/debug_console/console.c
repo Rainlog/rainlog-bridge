@@ -187,7 +187,7 @@ static void management_work(void *arg) {
              states[wifi_link_test_status()]);
     call->json = strdup(status);
   } else if (!strcmp(path, "/ota/status")) {
-    char status[256];
+    char status[OTA_STATUS_JSON_MAX];
     ota_update_status_json(status, sizeof(status));
     call->json = strdup(status);
   } else if (!strcmp(path, "/ota/check"))

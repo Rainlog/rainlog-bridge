@@ -15,6 +15,8 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
+#include "esp_err.h"
 
 // Start the background OTA task (checker + applier). Call once at boot, after
 // WiFi is up. Idempotent guards inside; safe even if the uplink is still down.
@@ -37,13 +39,28 @@ void ota_update_request_check(void);
 // image. Poll ota_update_status_json() for progress.
 void ota_update_request_apply(void);
 
+#define OTA_STATUS_JSON_MAX 512
+
 // Write the current OTA status as a JSON object into out:
 //   {"phase":"idle|checking|uptodate|available|updating|error",
 //    "running":"<ver>","latest":"<ver>","available":bool,
-//    "progress":<0-100>,"error":"<msg>"}
+//    "progress":<0-100>,"error":"<msg>","board":"<board>",
+//    "max_image_size":<bytes>,"running_slot":"<slot>",
+//    "boot_slot":"<slot>","pending_verification":bool}
 void ota_update_status_json(char *out, size_t len);
 
 // If the running image is pending verification after an OTA, mark it valid so
 // the bootloader won't roll it back. Call once the bridge has proven healthy
 // (servers up, ran a while without crashing). A no-op otherwise.
 void ota_update_mark_valid(void);
+
+// Manual uploads share an exclusive operation lock with server OTA updates.
+// Only a fully verified image is selected for boot. Finish success retains
+// the lock until the caller schedules a reboot; failures keep the old image.
+typedef struct ota_manual ota_manual_t;
+esp_err_t ota_manual_begin(const uint8_t *prefix, size_t prefix_size,
+                           size_t image_size, ota_manual_t **upload,
+                           const char **error);
+esp_err_t ota_manual_write(ota_manual_t *upload, const uint8_t *data, size_t len);
+esp_err_t ota_manual_finish(ota_manual_t *upload, const char **error);
+void ota_manual_abort(ota_manual_t *upload);

@@ -1,4 +1,5 @@
 import { createRadio } from './radio';
+import { createManualUpdate } from './manual-update';
 declare const RADIO_MHZ: number;
 // Rainlog Bridge config page behavior. Bundled + minified by build.mjs and
 // inlined into a single index.html that the firmware embeds. The page is fully
@@ -54,6 +55,8 @@ type OtaPhase =
   | 'error';
 
 interface OtaStatus {
+  board?: string;
+  max_image_size?: number;
   phase: OtaPhase;
   running: string;
   latest: string;
@@ -198,9 +201,40 @@ function bridgePwError(): string | null {
   return null;
 }
 
+function receptionError(): string | null {
+  if (RADIO_MHZ === 0) return null;
+  return !(el('radioEnabled') as HTMLInputElement).checked &&
+    !(el('wifiInterceptionEnabled') as HTMLInputElement).checked
+    ? 'Enable at least one reception source.'
+    : null;
+}
+
 function revalidate(): void {
-  const interception = document.getElementById('wifiInterceptionEnabled') as HTMLInputElement | null;
-  (el('bridgeWifiFields') as HTMLFieldSetElement).disabled = interception !== null && !interception.checked;
+  const interception = document.getElementById(
+    'wifiInterceptionEnabled',
+  ) as HTMLInputElement | null;
+  (el('bridgeWifiFields') as HTMLFieldSetElement).disabled =
+    interception !== null && !interception.checked;
+  if (RADIO_MHZ !== 0) {
+    const radio = el('radioEnabled') as HTMLInputElement;
+    radio.disabled = radio.checked && !interception!.checked;
+    interception!.disabled = interception!.checked && !radio.checked;
+    el('reception_err').textContent = receptionError() ?? '';
+    // Disabled checkboxes do not submit, so preserve the locked-on source.
+    el('form')
+      .querySelectorAll('[data-reception]')
+      .forEach((input) => input.remove());
+    [radio, interception!]
+      .filter((input) => input.disabled && input.checked)
+      .forEach((input) => {
+        const value = document.createElement('input');
+        value.type = 'hidden';
+        value.name = input.name;
+        value.value = 'on';
+        value.dataset.reception = '';
+        el('form').append(value);
+      });
+  }
   const he = homePwError();
   const be = bridgePwError();
   el('sta_pass_err').textContent =
@@ -209,7 +243,7 @@ function revalidate(): void {
   document
     .querySelectorAll<HTMLButtonElement>('button[type=submit]')
     .forEach((button) => {
-      button.disabled = Boolean(he || be);
+      button.disabled = Boolean(he || be || receptionError());
     });
 }
 
@@ -447,8 +481,10 @@ const otaStat = (html: string): void => {
 };
 
 let otaPolling = false;
+const manualUpdate = createManualUpdate();
 
 function renderOta(s: OtaStatus): void {
+  manualUpdate.setStatus(s);
   const apply = el('otaApplyBtn') as HTMLButtonElement;
   const check = el('otaCheckBtn') as HTMLButtonElement;
   apply.hidden = !s.available || s.phase === 'updating';
@@ -773,20 +809,32 @@ document
 addErrorSlot(field('sta_pass'), 'sta_pass_err');
 addErrorSlot(field('ap_pass'), 'ap_pass_err');
 
-// Tab switching: show the chosen view, hide the rest, keep polling in sync.
-// The view list comes from the tab buttons themselves (data-view).
-const tabs = document.querySelectorAll<HTMLButtonElement>('.tab');
-tabs.forEach((btn) => {
-  btn.addEventListener('click', () => {
-    tabs.forEach((b) => {
-      b.classList.toggle('active', b === btn);
-      if (b.dataset.view) {
-        el(b.dataset.view).hidden = b !== btn;
-      }
-    });
-    updateDevPolling();
+// Routes preserve unsaved fields and keep polling in sync with browser history.
+const tabs = document.querySelectorAll<HTMLAnchorElement>('.tab');
+function renderRoute(): void {
+  let active = Array.from(tabs).find((tab) => tab.pathname === location.pathname);
+  if (!active) {
+    active = tabs[0];
+    history.replaceState(null, '', active.pathname);
+  }
+  tabs.forEach((tab) => {
+    tab.classList.toggle('active', tab === active);
+    if (tab === active) tab.setAttribute('aria-current', 'page');
+    else tab.removeAttribute('aria-current');
+    if (tab.dataset.view) el(tab.dataset.view).hidden = tab !== active;
+  });
+  updateDevPolling();
+}
+tabs.forEach((tab) => {
+  tab.addEventListener('click', (event) => {
+    if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    if (location.pathname !== tab.pathname) history.pushState(null, '', tab.pathname);
+    renderRoute();
   });
 });
+window.addEventListener('popstate', renderRoute);
+renderRoute();
 document.addEventListener('visibilitychange', updateDevPolling);
 
 el('signOut').addEventListener('click', () => {
@@ -814,7 +862,7 @@ el('form').addEventListener(
     const input = event.target as HTMLElement;
     const view = input.closest('#viewSetup') ? 'viewSetup' : 'viewDevices';
     (
-      document.querySelector(`[data-view=${view}]`) as HTMLButtonElement
+      document.querySelector(`[data-view=${view}]`) as HTMLAnchorElement
     ).click();
   },
   true,
@@ -823,7 +871,7 @@ el('form').addEventListener(
 el('form').addEventListener('submit', (e) => {
   // Belt-and-suspenders: Save is disabled while invalid, but guard the submit
   // too so a stray Enter can't POST a bad password and lose the page state.
-  if (homePwError() || bridgePwError()) {
+  if (homePwError() || bridgePwError() || receptionError()) {
     touched.add(field('sta_pass'));
     touched.add(field('ap_pass'));
     revalidate();
@@ -838,7 +886,10 @@ document
   .getElementById('radioRows')
   ?.addEventListener('input', () => refreshKnownGauges());
 
-document.getElementById('wifiInterceptionEnabled')?.addEventListener('change', revalidate);
+document
+  .getElementById('wifiInterceptionEnabled')
+  ?.addEventListener('change', revalidate);
+document.getElementById('radioEnabled')?.addEventListener('change', revalidate);
 
 void loadConfig();
 void scan();

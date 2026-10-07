@@ -229,6 +229,10 @@ button[type='submit']:disabled {
   border-bottom: 2px solid #e2e9f2;
 }
 .tab {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
   min-height: 44px;
   padding: 0.4em 1.2em;
   background: none;
@@ -399,4 +403,19 @@ a.open {
 
 input, select, button {
   font-family: inherit;
+}
+
+#reception_err:empty {
+  display: none;
+}
+
+#manualUpdate {
+  margin-top: 1.5em;
+  padding-top: 1em;
+  border-top: 1px solid #e2e9f2;
+}
+#manualUpdate summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: #1668c8;
 }

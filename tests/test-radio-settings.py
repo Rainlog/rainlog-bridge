@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """LILYGO radio settings integration test, selected serial device is required.
 
-Temporarily saves a test mapping and disables both reception modes, verifies
+Temporarily saves a test mapping and disables Wi-Fi interception while retaining radio reception, verifies
 persistence and LAN setup access after reboot, then restores original settings.
 Requires pyserial/esptool and configured home Wi-Fi. No weather uploads are sent.
 """
@@ -55,7 +55,7 @@ with serial.Serial(sys.argv[1], 115200, timeout=0.1) as port:
                          '{radio_map:c.radio_map,radio_enabled:c.radio_enabled,'
                          'wifi_interception_enabled:c.wifi_interception_enabled};})()')
         password = value('settings.get().ap_pass')
-        patch = {'radio_enabled': False, 'wifi_interception_enabled': False,
+        patch = {'radio_enabled': True, 'wifi_interception_enabled': False,
                  'radio_map': [{'model': 0, 'sensor_id': 7, 'channel': 0,
                                 'gauge_id': 4294967294, 'rainlog_key': 'test-only-key'}]}
         command('settings.set(' + json.dumps(patch) + ')')
@@ -64,7 +64,7 @@ with serial.Serial(sys.argv[1], 115200, timeout=0.1) as port:
         assert 'mode : sta (' in output and 'softAP' not in output
         saved = value('settings.get().radio_map')
         assert saved == patch['radio_map']
-        assert not value('radio.status().receiving')
+        assert value('radio.status().receiving')
         # The configured LAN can take several seconds to reconnect after reboot.
         deadline = time.monotonic() + 15
         while time.monotonic() < deadline:
@@ -79,7 +79,7 @@ with serial.Serial(sys.argv[1], 115200, timeout=0.1) as port:
         # A local setup request should finish in seconds, even during Wi-Fi sleep.
         with urllib.request.urlopen(request, timeout=10) as response:
             config = json.load(response)
-        assert not config['wifi_interception_enabled'] and not config['radio_enabled']
+        assert not config['wifi_interception_enabled'] and config['radio_enabled']
         assert config['radio_map'] == patch['radio_map']
         # Exercise real form parsing without saving: duplicate valid rows must
         # be rejected even with a non-default setup password.

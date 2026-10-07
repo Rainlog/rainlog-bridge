@@ -22,7 +22,7 @@ static char s_sessions[SESSION_MAX][TOKEN_HEX_LEN + 1];
 static uint8_t s_next_slot;
 
 // The sign-in page, styled to match the embedded config page (web/src). The
-// one %s is the inline error line ("" or the wrong-password message).
+// Format arguments are the allowlisted return route and inline error line.
 static const char LOGIN_PAGE_FMT[] =
     "<!doctype html><html lang=en><head><meta charset=utf-8>"
     "<meta name=viewport content=\"width=device-width,initial-scale=1\">"
@@ -43,9 +43,9 @@ static const char LOGIN_PAGE_FMT[] =
     "button{display:block;width:100%%;margin-top:1em;padding:1em;"
     "min-height:52px;font-size:1.15em;background:#1668c8;color:#fff;"
     "font-weight:600;border:none;border-radius:10px;cursor:pointer}"
-    "</style></head><body><form class=card method=POST action=/login>"
+    "</style></head><body><form class=card method=POST action=/login?next=%s>"
     "<h2>Rainlog Bridge</h2>"
-    "<p class=hint>Enter the bridge&rsquo;s Wi-Fi password to open setup.</p>"
+    "<p class=hint>Enter the bridge&rsquo;s Wi-Fi password to open the bridge.</p>"
     "<label for=pw>Password</label>"
     "<input id=pw name=password type=password autofocus "
     "autocomplete=current-password>"
@@ -83,12 +83,28 @@ bool session_auth_ok(httpd_req_t *req) {
   return false;
 }
 
+// Return only known app routes, never a user-supplied redirect destination.
+static const char *login_return_route(httpd_req_t *req) {
+  char query[64], next[32] = "";
+  if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK)
+    http_util_form_get(query, "next", next, sizeof(next));
+  const char *const routes[] = {"/setup", "/devices", "/firmware"};
+  for (size_t i = 0; i < sizeof(routes) / sizeof(routes[0]); i++) {
+    size_t length = strlen(routes[i]);
+    if (!strcmp(next, routes[i]) ||
+        (!strncmp(req->uri, routes[i], length) &&
+         (req->uri[length] == '\0' || req->uri[length] == '?')))
+      return routes[i];
+  }
+  return "/setup";
+}
+
 esp_err_t session_auth_send_login_page(httpd_req_t *req, bool wrong_password) {
   char *page = malloc(LOGIN_PAGE_MAX);
   if (page == NULL) {
     return ESP_ERR_NO_MEM;
   }
-  snprintf(page, LOGIN_PAGE_MAX, LOGIN_PAGE_FMT,
+  snprintf(page, LOGIN_PAGE_MAX, LOGIN_PAGE_FMT, login_return_route(req),
            wrong_password ? "Wrong password." : "");
   httpd_resp_set_status(req, "401 Unauthorized");
   httpd_resp_set_type(req, "text/html");
@@ -130,7 +146,7 @@ esp_err_t session_auth_login_handler(httpd_req_t *req) {
            tok);
   httpd_resp_set_status(req, "303 See Other");
   httpd_resp_set_hdr(req, "Set-Cookie", cookie);
-  httpd_resp_set_hdr(req, "Location", "/");
+  httpd_resp_set_hdr(req, "Location", login_return_route(req));
   return httpd_resp_send(req, NULL, 0);
 }
 

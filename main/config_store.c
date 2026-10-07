@@ -82,6 +82,8 @@ const char *config_validate(const bridge_config_t *cfg) {
       strpbrk(cfg->ota_manifest_path, "\r\n ?#"))
     return "invalid path";
 #if RAINLOG_RADIO
+  if (!cfg->radio_enabled && !cfg->wifi_interception_enabled)
+    return "Enable at least one reception source";
   if (cfg->provisioned && !cfg->wifi_interception_enabled && !cfg->sta_ssid[0])
     return "Home Wi-Fi required when Wi-Fi interception is disabled";
   if (cfg->radio_map_count > RADIO_MAP_MAX) return "too many radio mappings";
@@ -186,6 +188,12 @@ void config_load(void) {
     nvs_get_u8(h, "radio_n", &count);
     s_cfg.radio_map_count = count <= RADIO_MAP_MAX ? count : 0;
   }
+#endif
+#if RAINLOG_RADIO
+  // Older firmware allowed both sources off. Restore radio reception while
+  // retaining the existing network credentials and station mappings.
+  if (!s_cfg.radio_enabled && !s_cfg.wifi_interception_enabled)
+    s_cfg.radio_enabled = 1;
 #endif
   uint8_t u;
   if (nvs_get_u8(h, "provd", &u) == ESP_OK) {

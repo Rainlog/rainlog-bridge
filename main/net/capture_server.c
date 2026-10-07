@@ -122,8 +122,8 @@ void capture_server_start(void) {
   // DNS, and the forwarder/OTA TLS clients within LWIP's 16-socket table.
   config.max_open_sockets = 4;
   // WU capture (GET+POST) plus the config server's routes share this server
-  // (17 routes registered at present).
-  config.max_uri_handlers = 20;
+  // including manual firmware uploads.
+  config.max_uri_handlers = 24;
   // Generous task stack: the default 4KB overflowed once (instant client
   // drops). Forwarding now runs on its own task, but the config handlers still
   // template/parse sizable forms, and the headroom is cheap insurance.

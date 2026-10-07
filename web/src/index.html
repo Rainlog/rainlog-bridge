@@ -7,9 +7,9 @@
 <div class=card>
 <h2><img src=./favicon.png width=32 height=32 class=logo alt="">Rainlog Bridge<button type=button id=signOut class="mini signout" hidden>Sign out</button></h2>
 <nav class=tabs>
-<button type=button class="tab active" data-view=viewSetup>Setup</button>
-<button type=button class=tab data-view=viewDevices>Devices</button>
-<button type=button class=tab data-view=viewFirmware>Firmware<span id=fwWarn class=warn hidden>&#9888;&#xfe0e;</span></button>
+<a href=/setup class="tab active" data-view=viewSetup>Setup</a>
+<a href=/devices class=tab data-view=viewDevices>Devices</a>
+<a href=/firmware class=tab data-view=viewFirmware>Firmware<span id=fwWarn class=warn hidden>&#9888;&#xfe0e;</span></a>
 </nav>
 <div id=viewSetup>
 <form method=POST action=/save id=form>
@@ -41,6 +41,7 @@
 <h3>Weather radio</h3>
 <label class=check><input type=checkbox name=radio_enabled id=radioEnabled checked>Enable radio reception</label>
 <input type=hidden name=radio_form value=2>
+<p id=reception_err class=err></p>
 <p id=radioStatus class=small>Reading radio status...</p>
 </section>
 <!-- RADIO_END -->
@@ -51,6 +52,15 @@
 <h3>Firmware</h3>
 <p id=otaStat class=small></p>
 <div class=row><button type=button id=otaCheckBtn class=mini>Check for updates</button><button type=button id=otaApplyBtn class=mini hidden>Update now</button></div>
+<details id=manualUpdate>
+<summary>Manual update</summary>
+<p class=hint>Install a Rainlog Bridge app .bin you trust, built for this board. Keep power connected during installation. The current firmware stays bootable if upload or validation fails.</p>
+<label for=firmwareFile>Firmware file</label>
+<input type=file id=firmwareFile accept=".bin,application/octet-stream">
+<p id=firmwareFileInfo class=small></p>
+<div class=row><button type=button id=firmwareInstall class=mini disabled>Upload &amp; install</button><button type=button id=firmwareCancel class=mini hidden>Cancel upload</button></div>
+<p id=firmwareUploadStatus class=small role=status aria-live=polite></p>
+</details>
 </div>
 <div id=viewDevices hidden>
 <section id=wifiDevices>

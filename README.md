@@ -237,11 +237,28 @@ C6 builds use `build/` and `sdkconfig`; LILYGO builds use `build-lilygo/` and
 (C6) and `dependencies.esp32.lock` (LILYGO) pin exact versions. Once the Docker
 image is available, firmware compilation can run offline.
 
+### Manual firmware installation
+
+The **Firmware** tab's **Manual update** section accepts the app `.bin` from
+`build/rainlog-wireless-bridge.bin` (C6) or
+`build-lilygo/rainlog-wireless-bridge.bin` (LILYGO). Debug builds use their
+`build-debug/` or `build-lilygo-debug/` directory. Build with the current project
+so the file includes its board identity; merged images and older untagged apps
+are rejected. Choose a trusted image, review its version and board, then click
+**Upload & install**. Keep power connected until the bridge reboots.
+
+Only the inactive app slot is written. Identity, capacity and complete image
+integrity are checked before selecting it for boot. A failed or interrupted
+upload preserves the current firmware and settings. The bootloader rolls back
+if the new app resets before completing its startup health check. Manual
+installation also permits the same version or a downgrade.
+
 ### Configuration web UI
 
 The setup page is a TypeScript + esbuild subproject in `web/`, built into
 self-contained pages under `main/web/`. The firmware embeds the radio-enabled
-or radio-disabled page selected by its compiler flags.
+or radio-disabled gzip page selected by its compiler flags. The Node build
+minifies the page and compresses it with 100 Zopfli iterations.
 
 ```sh
 cd web && npm install && npm run build

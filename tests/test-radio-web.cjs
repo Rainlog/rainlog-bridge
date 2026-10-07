@@ -5,6 +5,14 @@ const http = require("http"),
   assert = require("assert");
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "playwright");
 (async () => {
+  let manualUploads = 0, rejectManual = true;
+  const firmware = Buffer.alloc(1024);
+  firmware[0] = 0xe9; firmware[23] = 1;
+  firmware.writeUInt32LE(0xabcd5432, 32);
+  firmware.write('1.0.0', 48);
+  firmware.write('rainlog-wireless-bridge', 80);
+  firmware.write('RLOGOTA1', 288);
+  firmware.write('esp32-c6fh8-lcd-1.47', 296);
   let wifiActive = true;
   let radioMappings = [];
   let radioPage = true,
@@ -62,6 +70,8 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "playwright");
     if (req.url === "/ota/status")
       return res.end(
         JSON.stringify({
+          board: "esp32-c6fh8-lcd-1.47",
+          max_image_size: 0x300000,
           phase: "uptodate",
           running: "1.0.0",
           latest: "1.0.0",
@@ -70,6 +80,20 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "playwright");
           error: "",
         }),
       );
+    if (req.url === '/ota/upload') {
+      assert.equal(req.headers['x-rainlog-ota'], '1');
+      assert.equal(req.headers['content-type'], 'application/octet-stream');
+      const chunks = [];
+      req.on('data', data => chunks.push(data));
+      return req.on('end', () => {
+        assert.deepEqual(Buffer.concat(chunks), firmware);
+        manualUploads++;
+        if (rejectManual) {
+          res.statusCode = 400;
+          res.end(JSON.stringify({error: 'Image verification failed; current firmware retained'}));
+        } else res.end(JSON.stringify({ok: true, rebooting: true}));
+      });
+    }
     if (req.url === "/save") {
       let body = "";
       req.on("data", (s) => (body += s));
@@ -79,9 +103,10 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "playwright");
       });
     }
     res.setHeader("Content-Type", "text/html");
+    res.setHeader("Content-Encoding", "gzip");
     res.end(
       fs.readFileSync(
-        "main/web/" + (radioPage ? "radio433/" : "") + "index.html",
+        "main/web/" + (radioPage ? "radio433/" : "") + "index.html.gz",
       ),
     );
   });
@@ -97,18 +122,33 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "playwright");
   let errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
   const url = "http://127.0.0.1:" + server.address().port;
-  await page.goto(url);
+  await page.goto(url + '/firmware');
+  assert.equal(await page.locator('#viewFirmware').isVisible(), true);
+  await page.getByRole('link', {name: 'Devices', exact: true}).click();
+  assert.equal(new URL(page.url()).pathname, '/devices');
+  await page.goBack();
+  assert.equal(await page.locator('#viewFirmware').isVisible(), true);
+  await page.goForward();
+  assert.equal(await page.locator('#viewDevices').isVisible(), true);
+  await page.reload();
+  assert.equal(await page.locator('#viewDevices').isVisible(), true);
+  await page.getByRole('link', {name: 'Setup', exact: true}).click();
+  assert.equal(new URL(page.url()).pathname, '/setup');
   await page.waitForFunction(() => document.querySelector('[name=ap_ssid]').value !== '');
   assert.equal(await page.locator('[name=ap_ssid]').isDisabled(), true);
   assert.equal(await page.locator('[name=ap_pass]').isDisabled(), true);
+  assert.equal(await page.locator('#radioEnabled').isDisabled(), true);
   await page.locator('#wifiInterceptionEnabled').check();
+  await page.locator('#radioEnabled').uncheck();
+  assert.equal(await page.locator('#wifiInterceptionEnabled').isDisabled(), true);
+  await page.locator('#radioEnabled').check();
   assert.equal(await page.locator('[name=ap_ssid]').isEnabled(), true);
   assert.equal(await page.locator('[name=ap_pass]').isEnabled(), true);
   await page.locator('#wifiInterceptionEnabled').uncheck();
   assert.equal(await page.locator('#radioSetup button').count(), 0);
   assert.equal(await page.locator('#radioSetup #radioRows').count(), 0);
   await page.locator('#radioStatus').getByText('Radio reception enabled. 2 devices seen.', {exact: true}).waitFor();
-  await page.getByRole("button", { name: "Devices", exact: true }).click();
+  await page.getByRole("link", { name: "Devices", exact: true }).click();
   await page
     .locator("#radioDeviceList")
     .getByText("La Crosse TX5U", { exact: false })
@@ -125,7 +165,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "playwright");
   );
   assert.equal(await page.locator('#radioDeviceList .radio-card').count(), 2);
 
-  await page.locator('.radio-card').filter({hasText: 'La Crosse TX5U'}).getByRole('button', {name: 'Add mapping', exact: true}).click();
+  await page.locator('.radio-card').filter({hasText: 'La Crosse TX5U'}).getByRole('button', {name: 'Add Rainlog mapping', exact: true}).click();
   assert.equal(await page.locator('[data-field=id]').inputValue(), '4');
   assert.equal(await page.locator('[data-field=id]').getAttribute('type'), 'hidden');
   assert.equal(await page.locator('[data-field=model]').getAttribute('type'), 'hidden');
@@ -141,7 +181,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "playwright");
   ]);
   assert.equal(await page.locator('[data-field=gauge]').inputValue(), 'Rainlog12345');
   assert.equal(await page.locator('[data-field=key]').inputValue(), 'test-pws-key');
-  await page.getByRole("button", { name: "Devices", exact: true }).click();
+  await page.getByRole("link", { name: "Devices", exact: true }).click();
   await page.locator("#wuRows .wu").fill("KTESTSTATION");
   await page.locator("#wuRows .wk").fill("test-wu-key");
   await page.locator("#wuRows .stationPicker").selectOption("Rainlog12345");
@@ -167,7 +207,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "playwright");
     {model: 1, sensor_id: 3271, channel: 67, gauge_id: 54322, rainlog_key: 'keep-iris-key'},
   ];
   await page.goto(url);
-  await page.getByRole('button', {name: 'Devices', exact: true}).click();
+  await page.getByRole("link", {name: 'Devices', exact: true}).click();
   await page.getByText(/This TX5U has not been seen/).waitFor();
   assert.equal(await page.getByRole('button', {name: 'Replace sensor', exact: true}).count(), 1);
   const txCard = page.locator('.radio-card').filter({has: page.locator('[data-field=model][value="0"]')});
@@ -188,7 +228,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "playwright");
   radioMappings = [];
   wifiActive = false;
   await page.goto(url);
-  await page.getByRole("button", { name: "Devices", exact: true }).click();
+  await page.getByRole("link", { name: "Devices", exact: true }).click();
   await page
     .locator("#radioDeviceList")
     .getByText("La Crosse TX5U", { exact: false })
@@ -197,6 +237,26 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "playwright");
   radioPage = false;
   await page.goto(url);
   assert.equal(await page.locator("#radioSetup").count(), 0);
+  assert.equal(await page.locator("#wifiInterceptionEnabled").count(), 0);
+  await page.getByRole("link", {name: 'Firmware', exact: true}).click();
+  await page.locator('#manualUpdate summary').click();
+  await page.locator('#firmwareFile').setInputFiles({name: 'short.bin', mimeType: 'application/octet-stream', buffer: Buffer.alloc(20)});
+  assert.equal(await page.locator('#firmwareInstall').isDisabled(), true);
+  const wrongBoard = Buffer.from(firmware);
+  wrongBoard.fill(0, 296, 336); wrongBoard.write('lilygo-t3-v1.6.1-sx1278', 296);
+  await page.locator('#firmwareFile').setInputFiles({name: 'wrong-board.bin', mimeType: 'application/octet-stream', buffer: wrongBoard});
+  await page.getByText('This firmware is for a different board.', {exact: true}).waitFor();
+  assert.equal(await page.locator('#firmwareInstall').isDisabled(), true);
+  assert.equal(manualUploads, 0);
+  await page.locator('#firmwareFile').setInputFiles({name: 'app.bin', mimeType: 'application/octet-stream', buffer: firmware});
+  await page.getByText(/Version 1.0.0 · esp32-c6fh8/).waitFor();
+  await page.getByRole('button', {name: 'Upload & install', exact: true}).click();
+  await page.getByText('Image verification failed; current firmware retained', {exact: true}).waitFor();
+  assert.equal(await page.locator('#firmwareInstall').isEnabled(), true);
+  rejectManual = false;
+  await page.getByRole('button', {name: 'Upload & install', exact: true}).click();
+  await page.getByText('Firmware verified. Rebooting; reconnect to the bridge shortly.', {exact: true}).waitFor();
+  assert.equal(manualUploads, 2);
   assert.deepEqual(errors, []);
   console.log(
     "Devices lists, WU station suggestions/manual entry, combined form submission and radio-disabled page passed",
