@@ -34,17 +34,25 @@ static const char *TAG = "ui";
 #define BL_DIM_AFTER_US (30 * 1000 * 1000)
 
 #if BOARD_DISPLAY_SSD1306
-#define OLED_COLUMNS (DISPLAY_W / GLYPH)
+#include "oled_logo.h"
+#define OLED_TEXT_X (OLED_LOGO_W + 1 + GLYPH)
+#if BOARD_DISPLAY_FONT == BOARD_FONT_6X10
+// Regular 6x10 glyphs have a blank sixth column. The final cell can omit it.
+#define OLED_COLUMNS ((DISPLAY_W - OLED_TEXT_X + 1) / GLYPH)
+#else
+#define OLED_COLUMNS ((DISPLAY_W - OLED_TEXT_X) / GLYPH)
+#endif
 #define OLED_ROWS (DISPLAY_H / GLYPH_H)
 #define OLED_ROW_HEIGHT (DISPLAY_H / OLED_ROWS)
 
 static void oled_line(int row, const char *text) {
   char line[OLED_COLUMNS + 1];
   snprintf(line, sizeof(line), "%s", text);
-  display_text(0, row * OLED_ROW_HEIGHT, 1, COLOR_WHITE, line);
+  display_text(OLED_TEXT_X, row * OLED_ROW_HEIGHT, 1, COLOR_WHITE, line);
 }
 
 static void oled_draw(uint32_t held) {
+  display_blit_mono(0, 0, OLED_LOGO_W, OLED_LOGO_H, oled_logo_pages);
   char line[80];
   if (held >= RESET_ARM_MS) {
     oled_line(0, "FACTORY RESET");

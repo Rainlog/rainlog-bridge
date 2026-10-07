@@ -1,0 +1,158 @@
+#!/usr/bin/env python3
+"""Generate the selected OLED logo, packed firmware data and preview.
+
+Run python tools/gen-oled-logo.py. Requires Pillow and locally installed
+Arial Narrow Bold. Firmware embeds the generated header and needs neither.
+The manually corrected icon is stored below as its final 1-bit pixel artwork.
+All preview enlargements use nearest-neighbor scaling.
+"""
+from pathlib import Path
+import re
+from PIL import Image, ImageDraw, ImageFont
+
+ROOT = Path(__file__).resolve().parent.parent
+FONT = '/usr/local/share/fonts/windows/ARIALNB.TTF'
+LABEL_FONT = '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'
+
+
+# Symmetric silhouette, centered single-pixel tip, narrowed black r trunk.
+ICON_ROWS = (
+    ".....#.....",
+    "....###....",
+    "...#####...",
+    "...#####...",
+    "..##.####..",
+    ".##.....##.",
+    ".##.....##.",
+    "###...#####",
+    "###..######",
+    "###..######",
+    "###..######",
+    ".##..#####.",
+    "..#######..",
+    "...#####...",
+)
+WRAP_PX = 2
+
+
+def logo_bitmap():
+    width, height = 64, 16
+    font_size, icon_size = 13, 14
+    logo = Image.new('1', (width, height))
+    icon = Image.new('1', (11, 14))
+    for y, row in enumerate(ICON_ROWS):
+        for x, pixel in enumerate(row):
+            icon.putpixel((x, y), 255 if pixel == '#' else 0)
+        lit = [x for x, pixel in enumerate(row) if pixel == '#']
+        assert min(lit) + max(lit) == 10
+    assert ICON_ROWS[0].count('#') == 1
+    text_x = icon_size + 2
+    logo.paste(icon, ((icon_size - icon.width) // 2, 0))
+    font = ImageFont.truetype(FONT, font_size)
+    # Render each glyph separately, so pair kerning and side bearings cannot
+    # create uneven gaps. Preserve its baseline, then place visible bounds
+    # with one blank pixel between glyphs, except the tightened R/a pair.
+    glyphs = []
+    for ch in 'Rainlog':
+        glyph = Image.new('1', (font_size * 2, font_size * 2))
+        draw = ImageDraw.Draw(glyph)
+        draw.fontmode = "1"
+        draw.text((0, 0), ch, font=font, fill=255)
+        bounds = glyph.getbbox()
+        assert bounds is not None
+        glyphs.append((glyph, bounds))
+    top = min(bounds[1] for _, bounds in glyphs)
+    bottom = max(bounds[3] for _, bounds in glyphs)
+    text_width = sum(bounds[2] - bounds[0] for _, bounds in glyphs) + len(glyphs) - 1
+    assert text_width <= width - text_x, 'Text must fit without clipping or stretching'
+    assert bottom - top <= height, 'Text must fit vertically'
+    x = text_x
+    for index, (glyph, bounds) in enumerate(glyphs):
+        if index == 1:
+            x -= 1  # Shift ainlog left one pixel, keeping R fixed.
+        cropped = glyph.crop(bounds)
+        if index == len(glyphs) - 1:
+            g_left, g_right = x, x + cropped.width - 1
+        logo.paste(cropped, (x, (height - (bottom - top)) // 2 + bounds[1] - top))
+        x += cropped.width + 1
+    # Solid line through the descender's bottom row, with one-pixel
+    # clearance around the g and two pixels around the drop. Extend to both edges.
+    line_y = (height - (bottom - top)) // 2 + glyphs[-1][1][3] - top - 1
+    drop_pixels = [x for x in range(icon_size) if logo.getpixel((x, line_y))]
+    drop_left, drop_right = min(drop_pixels), max(drop_pixels)
+    for x in range(width):
+        near_drop = drop_left - 2 <= x <= drop_right + 2
+        near_g = g_left - 1 <= x <= g_right + 1
+        if not near_drop and not near_g:
+            logo.putpixel((x, line_y), 255)
+    assert logo.crop((0, height - 2, width, height)).getbbox() is None
+    return logo.crop((0, 0, width, height - 2))
+
+
+def rotated_logo(logo):
+    # Wrap the horizontal artwork right-to-left before rotating for the OLED.
+    wrapped = Image.new('1', logo.size)
+    wrapped.paste(logo.crop((0, 0, logo.width - WRAP_PX, logo.height)), (WRAP_PX, 0))
+    wrapped.paste(logo.crop((logo.width - WRAP_PX, 0, logo.width, logo.height)), (0, 0))
+    return wrapped.transpose(Image.Transpose.ROTATE_90)
+
+
+def screen_preview(logo):
+    screen = Image.new('1', (128, 64))
+    screen.paste(rotated_logo(logo), (0, 0))
+    table = (ROOT / 'main/ui/font6x10.h').read_text().split('};')[0]
+    glyphs = [[int(v.strip(), 16) for v in row.split(',')]
+              for row in re.findall(r'\{([^{}]+)\},', table)]
+    rows = ['Wi-Fi network:', 'Rainlog-Bridge', 'Password:', 'example-password', 'Open in browser:', '192.168.4.1']
+    for row, text in enumerate(rows):
+        for i, ch in enumerate(text[:(128 - (logo.height + 1 + 6) + 1) // 6]):
+            for y, bits in enumerate(glyphs[ord(ch)]):
+                for x in range(6):
+                    if bits & (1 << x):
+                        screen.putpixel((logo.height + 1 + 6 + i * 6 + x, row * 10 + y), 255)
+    return screen
+
+
+def write_firmware(logo):
+    width, height = logo.size
+    assert height % 8 == 0
+    data = [sum(bool(logo.getpixel((x, page * 8 + bit))) << bit
+                for bit in range(8))
+            for page in range(height // 8) for x in range(width)]
+    lines = ['// Generated by tools/gen-oled-logo.py. Do not edit.',
+             '// Rainlog logo, rotated 90 degrees, SSD1306 page order.',
+             '#pragma once', '#include <stdint.h>',
+             f'#define OLED_LOGO_W {width}', f'#define OLED_LOGO_H {height}',
+             f'static const uint8_t oled_logo_pages[{len(data)}] = {{']
+    lines += ['  ' + ', '.join(f'0x{v:02x}' for v in data[i:i+width]) + ','
+              for i in range(0, len(data), width)]
+    lines += ['};', '']
+    (ROOT / 'main/ui/oled_logo.h').write_text('\n'.join(lines))
+    logo.convert('RGB').save(ROOT / 'tools/oled_logo.png')
+
+
+def main():
+    logo = logo_bitmap()
+    write_firmware(rotated_logo(logo))
+    screen = screen_preview(logo)
+    logo = rotated_logo(logo).transpose(Image.Transpose.ROTATE_270)
+    sheet = Image.new('RGB', (1000, 800), '#e8edf2')
+    draw = ImageDraw.Draw(sheet)
+    title = ImageFont.truetype(LABEL_FONT, 30)
+    label = ImageFont.truetype(LABEL_FONT, 21)
+    draw.text((24, 18), f'OLED logo: shifted right {WRAP_PX}px with wrap', font=title, fill='#13202e')
+    draw.text((24, 62), '13px Arial Narrow Bold, 14px icon. Lower line; 2px drop gap, extra text space.', font=label, fill='#33465a')
+    sheet.paste(screen.convert('RGB').resize((768, 384), Image.Resampling.NEAREST), (24, 106))
+    draw.text((810, 275), '6x', font=label, fill='#33465a')
+    sheet.paste(logo.convert('RGB').resize((512, logo.height * 8), Image.Resampling.NEAREST), (24, 530))
+    draw.text((550, 580), '8x horizontal', font=label, fill='#33465a')
+    sheet.paste(screen.convert('RGB'), (24, 710))
+    draw.text((172, 730), '1x actual pixels', font=label, fill='#33465a')
+    output = ROOT / 'tools/oled_logo_preview.png'
+    sheet.save(output)
+
+    print(f'Wrote {output}')
+
+
+if __name__ == '__main__':
+    main()

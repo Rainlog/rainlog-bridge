@@ -148,6 +148,15 @@ void display_blit_rgba(int x, int y, int w, int h, const uint8_t *rgba) {
   }
 }
 
+void display_blit_mono(int x, int y, int w, int h, const uint8_t *pages) {
+  for (int row = 0; row < h; row++) {
+    for (int col = 0; col < w; col++) {
+      bool lit = pages[(row / 8) * w + col] & (1U << (row % 8));
+      put_pixel(x + col, y + row, lit ? COLOR_WHITE : COLOR_BLACK);
+    }
+  }
+}
+
 void display_flush(void) {
   if (s_fb == NULL) return;
   esp_err_t err = display_panel_flush(s_fb);

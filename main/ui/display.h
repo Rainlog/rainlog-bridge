@@ -72,5 +72,9 @@ void display_set_backlight(uint8_t percent);
 // Colors go through display_rgb so they match the panel.
 void display_blit_rgba(int x, int y, int w, int h, const uint8_t *rgba);
 
+// Blit packed monochrome pages (LSB is the top pixel of each 8-pixel page).
+// Height must be a multiple of 8. Zero bits draw black, one bits draw white.
+void display_blit_mono(int x, int y, int w, int h, const uint8_t *pages);
+
 // Push the framebuffer to the panel.
 void display_flush(void);

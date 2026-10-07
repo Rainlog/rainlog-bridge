@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "display_panel.h"
+#include "oled_logo.h"
 static display_color_t frame[DISPLAY_FB_BYTES / sizeof(display_color_t)];
 size_t framebuffer_allocation;
 static display_color_t pixel_at(int index) {
@@ -51,6 +52,32 @@ int main(void) {
   assert(pixel_at(DISPLAY_W) == COLOR_BLACK);
   assert(pixel_at(DISPLAY_W * DISPLAY_H - 1) == COLOR_BLUE);
 
+  // The selected logo must reproduce its packed asset without changing
+  // adjacent content, including its trimmed 14-pixel width.
+  display_clear(COLOR_BLACK);
+  display_blit_mono(0, 0, OLED_LOGO_W, OLED_LOGO_H, oled_logo_pages);
+  display_flush();
+  assert(OLED_LOGO_W == 14 && OLED_LOGO_H == 64);
+  for (int y = 0; y < OLED_LOGO_H; y++) {
+    for (int x = 0; x < OLED_LOGO_W; x++) {
+      bool lit = (oled_logo_pages[(y / 8) * OLED_LOGO_W + x] >> (y % 8)) & 1;
+      assert(pixel_at(y * DISPLAY_W + x) == (lit ? COLOR_WHITE : COLOR_BLACK));
+    }
+    assert(pixel_at(y * DISPLAY_W + OLED_LOGO_W) == COLOR_BLACK);
+  }
+
+  // Packed bitmap placement crosses page boundaries, clears zero bits and
+  // clips its last column at the display edge.
+  const uint8_t mono[] = {0x81, 0x02};
+  display_clear(COLOR_WHITE);
+  display_blit_mono(DISPLAY_W - 1, 3, 2, 8, mono);
+  display_flush();
+  assert(pixel_at(3 * DISPLAY_W + DISPLAY_W - 1) == COLOR_WHITE);
+  assert(pixel_at(4 * DISPLAY_W + DISPLAY_W - 1) == COLOR_BLACK);
+  assert(pixel_at(10 * DISPLAY_W + DISPLAY_W - 1) == COLOR_WHITE);
+  assert(pixel_at(4 * DISPLAY_W + DISPLAY_W - 2) == COLOR_WHITE);
+  display_clear(COLOR_BLACK);
+
   const uint8_t image[] = {0, 255, 0, 255, 255, 0, 0, 39};
   display_blit_rgba(0, 0, 2, 1, image);
   display_flush();
@@ -80,6 +107,18 @@ int main(void) {
   assert(lit > 0);
 #if BOARD_DISPLAY_FONT == BOARD_FONT_6X10
   assert(GLYPH == 6 && GLYPH_H == 10);
+#if BOARD_DISPLAY_SSD1306
+  // Eighteen characters fit from x=21 with the last cell's blank column
+  // clipped. Verify the final glyph still has its complete five-pixel face.
+  display_clear(COLOR_BLACK);
+  display_text(21, 0, 1, COLOR_WHITE, "AAAAAAAAAAAAAAAAAA");
+  display_flush();
+  assert(pixel_at(3 * DISPLAY_W + 123) == COLOR_WHITE);
+  assert(pixel_at(3 * DISPLAY_W + 127) == COLOR_WHITE);
+  display_clear(COLOR_BLACK);
+  display_text(0, y, 1, COLOR_WHITE, text);
+  display_flush();
+#endif
   // Known X11 6x10 'A' strokes verify bit order, cell advance and scaling.
   assert(pixel_at((y + 1) * DISPLAY_W + 2) == COLOR_WHITE);
   assert(pixel_at((y + 1) * DISPLAY_W + 3) == COLOR_BLACK);
