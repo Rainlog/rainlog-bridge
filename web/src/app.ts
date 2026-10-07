@@ -1,8 +1,10 @@
+import { createRadio } from './radio';
+declare const RADIO_MHZ: number;
 // Rainlog Bridge config page behavior. Bundled + minified by build.mjs and
 // inlined into a single index.html that the firmware embeds. The page is fully
 // static: current settings are fetched from /config at load and written into
-// the fields (so the embedded HTML needs no server-side templating). Secrets
-// are never sent back, only "is a value set" hints for the placeholders.
+// the fields (so the embedded HTML needs no server-side templating). Wi-Fi
+// passwords stay hidden; authenticated users can edit saved station keys.
 
 const WU_MAP_MAX = 8;
 
@@ -31,6 +33,12 @@ interface BridgeConfig {
   ap_pass_default: boolean;
   ap_ip: string;
   wu_map: WuMapping[];
+  radio_enabled?: boolean;
+  wifi_interception_enabled?: boolean;
+  wifi_interception_active?: boolean;
+  radio_map?: Parameters<
+    ReturnType<typeof createRadio>['load']
+  >[0]['radio_map'];
 }
 
 interface TestStatus {
@@ -64,6 +72,7 @@ interface ApClient {
   connected: boolean;
   age_s: number; // seconds since last seen
   you: boolean; // this row is the device viewing the page
+  gauge_id?: number;
   rx: number; // weather uploads captured from this device (this boot)
   rl: number; // of those, accepted by Rainlog
   wu: number; // of those, relayed to Weather Underground
@@ -173,6 +182,7 @@ function homePwError(): string | null {
 // Bridge Wi-Fi password: must be set when still the default, and any new value
 // must be 8+ chars and not the shipped default (mirrors the firmware).
 function bridgePwError(): string | null {
+  if ((el('bridgeWifiFields') as HTMLFieldSetElement).disabled) return null;
   const v = field('ap_pass').value;
   if (apPassDefault && v.length === 0) {
     return 'Choose a Bridge Wi-Fi password.';
@@ -189,14 +199,18 @@ function bridgePwError(): string | null {
 }
 
 function revalidate(): void {
+  const interception = document.getElementById('wifiInterceptionEnabled') as HTMLInputElement | null;
+  (el('bridgeWifiFields') as HTMLFieldSetElement).disabled = interception !== null && !interception.checked;
   const he = homePwError();
   const be = bridgePwError();
   el('sta_pass_err').textContent =
     touched.has(field('sta_pass')) && he ? he : '';
   el('ap_pass_err').textContent = touched.has(field('ap_pass')) && be ? be : '';
-  (
-    document.querySelector('button[type=submit]') as HTMLButtonElement
-  ).disabled = Boolean(he || be);
+  document
+    .querySelectorAll<HTMLButtonElement>('button[type=submit]')
+    .forEach((button) => {
+      button.disabled = Boolean(he || be);
+    });
 }
 
 // Insert an inline error <div> after a field's wrapper (.pw) or the field.
@@ -248,10 +262,23 @@ function addRow(m?: WuMapping): void {
   // that or the bare gauge number.
   const gauge = document.createElement('input');
   gauge.className = 'rl';
+
+  gauge.setAttribute('form', 'form');
+  gauge.setAttribute('aria-label', 'Rainlog station ID');
   gauge.placeholder = 'Rainlog station ID (Rainlog12345)';
   if (m) {
     gauge.value = `Rainlog${m.gauge_id}`;
   }
+
+  const picker = document.createElement('select');
+  picker.className = 'stationPicker';
+  picker.setAttribute('aria-label', 'Choose a known Rainlog station');
+  picker.addEventListener('change', () => {
+    if (picker.value) gauge.value = picker.value;
+  });
+  const station = document.createElement('div');
+  station.className = 'combo';
+  station.append(gauge, picker);
 
   // Downward arrow between the Rainlog station and the WU credentials it
   // forwards to, making the row read as "this forwards down to this".
@@ -261,6 +288,7 @@ function addRow(m?: WuMapping): void {
 
   const wuId = document.createElement('input');
   wuId.className = 'wu';
+  wuId.setAttribute('form', 'form');
   wuId.placeholder = 'WU station ID';
   if (m) {
     wuId.value = m.wu_id;
@@ -268,6 +296,7 @@ function addRow(m?: WuMapping): void {
 
   const wuKey = document.createElement('input');
   wuKey.className = 'wk';
+  wuKey.setAttribute('form', 'form');
   wuKey.type = 'password';
   wuKey.placeholder = 'WU key';
   if (m) {
@@ -283,10 +312,11 @@ function addRow(m?: WuMapping): void {
     refreshAddButton();
   });
 
-  div.append(gauge, arrow, wuId, wuKey, rm);
+  div.append(station, arrow, wuId, wuKey, rm);
   attachPwToggle(wuKey); // wraps wuKey in place (stays before rm)
   rows.appendChild(div);
   refreshAddButton();
+  refreshKnownGauges();
 }
 
 function refreshAddButton(): void {
@@ -304,6 +334,47 @@ function numberRows(): void {
     (row.querySelector('.wu') as HTMLInputElement).name = `wu${i}`;
     (row.querySelector('.wk') as HTMLInputElement).name = `wk${i}`;
   }
+}
+
+// Saved mappings and station IDs observed in console uploads are suggestions.
+// The station picker fills an editable input for stations not yet seen.
+const knownGaugeIds = new Set<number>();
+function refreshKnownGauges(ids: number[] = []): void {
+  ids.forEach((id) => {
+    if (Number.isInteger(id) && id > 0 && id <= 4294967295)
+      knownGaugeIds.add(id);
+  });
+  document
+    .querySelectorAll<HTMLInputElement>('#radioRows [data-field=gauge]')
+    .forEach((input) => {
+      const id = Number(input.value.replace(/^Rainlog/i, ''));
+      if (Number.isInteger(id) && id > 0 && id <= 4294967295)
+        knownGaugeIds.add(id);
+    });
+  const inputs = Array.from(
+    document.querySelectorAll<HTMLInputElement>('#wuRows .rl'),
+  );
+  const used = new Set(
+    inputs
+      .filter((input) => input.value)
+      .map((input) => Number(input.value.replace(/^Rainlog/i, ''))),
+  );
+  const unused = [...knownGaugeIds].filter((id) => !used.has(id));
+  const blank = inputs.filter((input) => !input.value);
+  if (unused.length === 1 && blank.length === 1)
+    blank[0].value = `Rainlog${unused[0]}`;
+  inputs.forEach((input) => {
+    const picker = input.parentElement!.querySelector('select')!;
+    picker.replaceChildren(new Option('Enter station ID manually', ''));
+    [...knownGaugeIds]
+      .sort((a, b) => a - b)
+      .forEach((id) => picker.add(new Option(`Rainlog${id}`, `Rainlog${id}`)));
+    picker.value = knownGaugeIds.has(
+      Number(input.value.replace(/^Rainlog/i, '')),
+    )
+      ? input.value
+      : '';
+  });
 }
 
 // ---- scanning + WiFi test -------------------------------------------------
@@ -473,6 +544,7 @@ const DEV_POLL_MS = 5000;
 
 // The bridge's AP SSID (from /config), for the devices empty-state text.
 let apSsid = '';
+let wifiInterceptionActive = RADIO_MHZ === 0;
 
 // The bridge's AP IP (from /config). Device links only work for a viewer on
 // the bridge's own WiFi (there is no routing from the home LAN into the AP
@@ -537,6 +609,7 @@ function renderDevices(list: ApClient[]): void {
     const sub = document.createElement('div');
     sub.className = 'devsub small';
     const parts = [c.mac, c.ip || 'no address yet'];
+    if (c.gauge_id) parts.push(`Rainlog${c.gauge_id}`);
     // Whichever identity facts the title doesn't already say.
     if (c.hostname && c.hostname !== title) {
       parts.push(c.hostname);
@@ -603,7 +676,11 @@ function renderDevices(list: ApClient[]): void {
 
 async function pollDevices(): Promise<void> {
   try {
-    renderDevices((await (await fetch('/clients')).json()) as ApClient[]);
+    if (wifiInterceptionActive) {
+      const clients = (await (await fetch('/clients')).json()) as ApClient[];
+      refreshKnownGauges(clients.map((client) => client.gauge_id ?? 0));
+      renderDevices(clients);
+    }
   } catch {
     /* keep the last rendered list on a blip */
   }
@@ -655,6 +732,14 @@ async function loadConfig(): Promise<void> {
     /* leave fields blank if the bridge is unreachable */
   }
   if (cfg) {
+    radio?.load(cfg);
+    refreshKnownGauges([
+      ...cfg.wu_map.map((mapping) => mapping.gauge_id),
+      ...(cfg.radio_map ?? []).map((mapping) => mapping.gauge_id),
+    ]);
+    wifiInterceptionActive =
+      cfg.wifi_interception_active ?? cfg.wifi_interception_enabled ?? true;
+    el('wifiDevices').hidden = !wifiInterceptionActive;
     apPassDefault = cfg.ap_pass_default;
     apSsid = cfg.ap_ssid;
     apIp = cfg.ap_ip;
@@ -675,6 +760,8 @@ async function loadConfig(): Promise<void> {
   }
   revalidate(); // reflect the loaded state on the Save button
 }
+
+const radio = RADIO_MHZ === 433 ? createRadio(attachPwToggle) : null;
 
 // Add a Show/Hide toggle to the static password fields (the WU key fields get
 // one as their rows are created).
@@ -719,6 +806,20 @@ el('nets').addEventListener('change', (e) => {
     sel.selectedIndex = 0; // back to the chevron label
   }
 });
+// Associated controls live in both tabs. Reveal the invalid field before
+// native form validation tries to focus it.
+el('form').addEventListener(
+  'invalid',
+  (event) => {
+    const input = event.target as HTMLElement;
+    const view = input.closest('#viewSetup') ? 'viewSetup' : 'viewDevices';
+    (
+      document.querySelector(`[data-view=${view}]`) as HTMLButtonElement
+    ).click();
+  },
+  true,
+);
+
 el('form').addEventListener('submit', (e) => {
   // Belt-and-suspenders: Save is disabled while invalid, but guard the submit
   // too so a stray Enter can't POST a bad password and lose the page state.
@@ -730,7 +831,14 @@ el('form').addEventListener('submit', (e) => {
     return;
   }
   numberRows();
+  radio?.numberRows();
 });
+
+document
+  .getElementById('radioRows')
+  ?.addEventListener('input', () => refreshKnownGauges());
+
+document.getElementById('wifiInterceptionEnabled')?.addEventListener('change', revalidate);
 
 void loadConfig();
 void scan();

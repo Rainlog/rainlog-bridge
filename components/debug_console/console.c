@@ -161,8 +161,11 @@ typedef struct {
 static void management_work(void *arg) {
   management_call *call = arg;
   const char *path = call->path;
-  if (!strcmp(path, "/config"))
-    call->json = config_server_config_json();
+  if (!strcmp(path, "/config")) call->json = config_server_config_json();
+#if RAINLOG_RADIO
+  else if (!strcmp(path, "/radio"))
+    call->json = config_server_radio_json();
+#endif
   else if (!strcmp(path, "/scan") || !strcmp(path, "/scanlive"))
     call->json = config_server_scan_json(!strcmp(path, "/scanlive"));
   else if (!strcmp(path, "/clients"))
@@ -215,6 +218,9 @@ static void management_work(void *arg) {
     call->result = ESP_ERR_INVALID_ARG;
   if ((!strcmp(path, "/config") || !strcmp(path, "/scan") ||
        !strcmp(path, "/scanlive") || !strcmp(path, "/clients") ||
+#if RAINLOG_RADIO
+       !strcmp(path, "/radio") ||
+#endif
        !strcmp(path, "/teststatus") || !strcmp(path, "/ota/status")) &&
       !call->json)
     call->result = ESP_ERR_NO_MEM;
@@ -244,6 +250,9 @@ static duk_ret_t decode_json(duk_context *ctx, void *data) {
 static duk_ret_t js_web(duk_context *ctx) {
   management_call call = {.path = duk_require_string(ctx, 0)};
   static const char *allowed[] = {
+#if RAINLOG_RADIO
+      "/radio",
+#endif
       "/config",    "/scan",  "/scanlive",    "/clients",    "/rename",
       "/save",      "/test",  "/teststatus",  "/ota/status", "/ota/check",
       "/ota/apply", "reboot", "factoryReset", "stats.clear"};
@@ -280,7 +289,9 @@ static duk_ret_t js_settings_get(duk_context *ctx) {
   for (size_t i = 0; i < config_field_count; i++) {
     const config_field_t *f = &config_fields[i];
     const void *value = (const char *)&cfg + f->offset;
-    if (f->maximum)
+    if (f->maximum == 1)
+      duk_push_boolean(ctx, *(const uint32_t *)value != 0);
+    else if (f->maximum)
       duk_push_uint(ctx, *(const uint32_t *)value);
     else
       duk_push_string(ctx, value);
@@ -299,6 +310,20 @@ static duk_ret_t js_settings_get(duk_context *ctx) {
     duk_put_prop_index(ctx, -2, i);
   }
   duk_put_prop_string(ctx, -2, "wu_map");
+#if RAINLOG_RADIO
+  duk_push_array(ctx);
+  for (unsigned i = 0; i < cfg.radio_map_count; i++) {
+    duk_push_object(ctx);
+    NUMBER_PROPERTY("model", cfg.radio_map[i].model);
+    NUMBER_PROPERTY("sensor_id", cfg.radio_map[i].sensor_id);
+    NUMBER_PROPERTY("channel", (unsigned char)cfg.radio_map[i].channel);
+    NUMBER_PROPERTY("gauge_id", cfg.radio_map[i].gauge_id);
+    duk_push_string(ctx, cfg.radio_map[i].rainlog_key);
+    duk_put_prop_string(ctx, -2, "rainlog_key");
+    duk_put_prop_index(ctx, -2, i);
+  }
+  duk_put_prop_string(ctx, -2, "radio_map");
+#endif
   return 1;
 }
 static void read_string(duk_context *ctx, duk_idx_t index, const char *key,
@@ -327,9 +352,51 @@ static duk_ret_t js_settings_set(duk_context *ctx) {
     const char *name = duk_require_string(ctx, -2);
     if (!strcmp(name, "sta_ssid") || !strcmp(name, "sta_pass") ||
         !strcmp(name, "ap_ssid") || !strcmp(name, "ap_pass") ||
-        !strcmp(name, "wu_map"))
+        !strcmp(name, "wu_map")
+#if RAINLOG_RADIO
+        || !strcmp(name, "wifi_interception_enabled")
+#endif
+    )
       cfg.provisioned = true;
-    if (!strcmp(name, "wu_map")) {
+#if RAINLOG_RADIO
+    if (!strcmp(name, "radio_map")) {
+      if (!duk_is_array(ctx, -1) || duk_get_length(ctx, -1) > RADIO_MAP_MAX)
+        return duk_error(ctx, DUK_ERR_RANGE_ERROR,
+                         "radio_map must be an array of at most %d entries",
+                         RADIO_MAP_MAX);
+      cfg.radio_map_count = duk_get_length(ctx, -1);
+      memset(cfg.radio_map, 0, sizeof(cfg.radio_map));
+      for (unsigned i = 0; i < cfg.radio_map_count; i++) {
+        duk_get_prop_index(ctx, -1, i);
+        duk_idx_t row = duk_get_top_index(ctx);
+        radio_mapping_t *m = &cfg.radio_map[i];
+        const char *fields[] = {"model", "sensor_id", "channel", "gauge_id"};
+        uint32_t values[4];
+        for (unsigned j = 0; j < 4; j++) {
+          duk_get_prop_string(ctx, row, fields[j]);
+          double value = duk_require_number(ctx, -1);
+          if (!isfinite(value) || value < 0 || value > UINT32_MAX ||
+              value != (uint32_t)value)
+            return duk_error(ctx, DUK_ERR_RANGE_ERROR,
+                             "invalid radio mapping number");
+          values[j] = value;
+          duk_pop(ctx);
+        }
+        if (values[0] > 1 || values[2] > 127)
+          return duk_error(ctx, DUK_ERR_RANGE_ERROR,
+                           "invalid model or channel");
+        m->model = values[0];
+        m->sensor_id = values[1];
+        m->channel = values[2];
+        m->gauge_id = values[3];
+        read_string(ctx, row, "rainlog_key", m->rainlog_key,
+                    sizeof(m->rainlog_key));
+        duk_pop(ctx);
+      }
+      cfg.provisioned = true;
+    } else
+#endif
+        if (!strcmp(name, "wu_map")) {
       if (!duk_is_array(ctx, -1) || duk_get_length(ctx, -1) > WU_MAP_MAX)
         return duk_error(ctx, DUK_ERR_RANGE_ERROR,
                          "wu_map must be an array of at most %d entries",
@@ -364,7 +431,9 @@ static duk_ret_t js_settings_set(duk_context *ctx) {
                          "unknown or read-only setting: %s", name);
       void *value = (char *)&cfg + f->offset;
       if (f->maximum) {
-        double number = duk_require_number(ctx, -1);
+        double number = f->maximum == 1 && duk_is_boolean(ctx, -1)
+                            ? duk_get_boolean(ctx, -1)
+                            : duk_require_number(ctx, -1);
         if (!isfinite(number) || number < 0 || number > f->maximum ||
             number != (uint32_t)number)
           return duk_error(ctx, DUK_ERR_RANGE_ERROR, "%s out of range", name);
@@ -425,6 +494,94 @@ static duk_ret_t js_log_level(duk_context *ctx) {
   esp_log_level_set(tag, level);
   return 0;
 }
+#include "radio.h"
+static duk_ret_t js_radio_status(duk_context *ctx) {
+  radio_status_t status;
+  radio_status(&status);
+  duk_push_object(ctx);
+  duk_push_boolean(ctx, status.available);
+  duk_put_prop_string(ctx, -2, "available");
+  duk_push_boolean(ctx, status.receiving);
+  duk_put_prop_string(ctx, -2, "receiving");
+  NUMBER_PROPERTY("chip_version", status.chip_version);
+  NUMBER_PROPERTY("frequency_hz", status.frequency_hz);
+  NUMBER_PROPERTY("bandwidth_hz", status.bandwidth_hz);
+  NUMBER_PROPERTY("ook_floor", status.ook_floor);
+  NUMBER_PROPERTY("bursts", status.bursts);
+  NUMBER_PROPERTY("durations", status.durations);
+  NUMBER_PROPERTY("packets", status.packets);
+  NUMBER_PROPERTY("dropped", status.dropped);
+  NUMBER_PROPERTY("rssi_dbm", status.rssi_dbm);
+  NUMBER_PROPERTY("error", status.error);
+  return 1;
+}
+static duk_ret_t js_radio_receive(duk_context *ctx) {
+  if (!duk_is_boolean(ctx, 0))
+    return duk_error(ctx, DUK_ERR_TYPE_ERROR, "receive expects a boolean");
+  esp_err_t err = radio_receive_enable(duk_get_boolean(ctx, 0));
+  if (err != ESP_OK)
+    return duk_error(ctx, DUK_ERR_ERROR, "radio receive: %s",
+                     esp_err_to_name(err));
+  duk_push_true(ctx);
+  return 1;
+}
+static duk_ret_t js_radio_tune(duk_context *ctx) {
+  double frequency = duk_require_number(ctx, 0),
+         bandwidth = duk_require_number(ctx, 1),
+         floor = duk_require_number(ctx, 2);
+  if (!isfinite(frequency) || frequency < 400000000 || frequency > 470000000 ||
+      frequency != (uint32_t)frequency || !isfinite(bandwidth) ||
+      bandwidth < 2600 || bandwidth > 250000 ||
+      bandwidth != (uint32_t)bandwidth || !isfinite(floor) || floor < 0 ||
+      floor > 255 || floor != (uint8_t)floor)
+    return duk_error(ctx, DUK_ERR_RANGE_ERROR,
+                     "radio tune expects 400-470 MHz, 2600-250000 Hz "
+                     "bandwidth, floor 0-255 (integers)");
+  esp_err_t err = radio_tune(frequency, bandwidth, floor);
+  if (err != ESP_OK)
+    return duk_error(ctx, DUK_ERR_ERROR, "radio tune: %s",
+                     esp_err_to_name(err));
+  duk_push_true(ctx);
+  return 1;
+}
+static duk_ret_t js_radio_packets(duk_context *ctx) {
+  radio_reading_t readings[RADIO_HISTORY];
+  size_t count = radio_readings(readings, RADIO_HISTORY);
+  duk_push_array(ctx);
+  for (size_t i = 0; i < count; i++) {
+    const weather_packet_t *p = &readings[i].packet;
+    duk_push_object(ctx);
+    duk_push_string(ctx, p->model == WEATHER_LACROSSE_TX5U ? "LaCrosse-TX5U"
+                                                           : "Acurite-5n1");
+    duk_put_prop_string(ctx, -2, "model");
+    NUMBER_PROPERTY("id", p->id);
+    NUMBER_PROPERTY("message_type", p->message_type);
+    NUMBER_PROPERTY("received_ms", readings[i].received_us / 1000);
+    NUMBER_PROPERTY("rssi_dbm", readings[i].rssi_dbm);
+    if (p->has_rain) {
+      NUMBER_PROPERTY("rain_raw", p->rain_raw);
+      NUMBER_PROPERTY("rain_mm", p->rain_mm);
+    }
+    if (p->model == WEATHER_ACURITE_5N1) {
+      char channel[2] = {p->channel, 0};
+      duk_push_string(ctx, channel);
+      duk_put_prop_string(ctx, -2, "channel");
+      duk_push_boolean(ctx, p->battery_ok);
+      duk_put_prop_string(ctx, -2, "battery_ok");
+      NUMBER_PROPERTY("sequence", p->sequence);
+      NUMBER_PROPERTY("wind_kph", p->wind_kph);
+      if (p->has_rain) {
+        NUMBER_PROPERTY("wind_direction", p->wind_direction);
+      }
+      if (p->has_temperature) {
+        NUMBER_PROPERTY("temperature_c", p->temperature_c);
+        NUMBER_PROPERTY("humidity", p->humidity);
+      }
+    }
+    duk_put_prop_index(ctx, -2, i);
+  }
+  return 1;
+}
 static void release_vm(void) {
   if (vm) duk_destroy_heap(vm);
   vm = NULL;
@@ -465,13 +622,27 @@ static bool execute(const char *source) {
     duk_put_prop_string(vm, -2, "set");
     duk_put_global_string(vm, "settings");
     duk_push_object(vm);
+    duk_push_c_function(vm, js_radio_status, 0);
+    duk_put_prop_string(vm, -2, "status");
+    duk_push_c_function(vm, js_radio_receive, 1);
+    duk_put_prop_string(vm, -2, "receive");
+    duk_push_c_function(vm, js_radio_tune, 3);
+    duk_put_prop_string(vm, -2, "tune");
+    duk_push_c_function(vm, js_radio_packets, 0);
+    duk_put_prop_string(vm, -2, "packets");
+    duk_put_global_string(vm, "radio");
+    duk_push_object(vm);
     duk_push_c_function(vm, js_web, 3);
     duk_put_prop_string(vm, -2, "call");
     duk_put_global_string(vm, "web");
     if (duk_peval_string(
             vm,
             "(function(){var "
-            "routes={config:'/config',scan:'/scan',scanLive:'/"
+            "routes={"
+#if RAINLOG_RADIO
+            "radio:'/radio',"
+#endif
+            "config:'/config',scan:'/scan',scanLive:'/"
             "scanlive',clients:'/clients',"
             "save:'/save',rename:'/rename',test:'/test',testStatus:'/"
             "teststatus',otaStatus:'/ota/status',"

@@ -16,67 +16,80 @@ import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const src = (p) => resolve(here, 'src', p);
-const outFile = resolve(here, '..', 'main', 'web', 'index.html');
+for (const radioMHz of [0, 433]) {
+  const outFile = resolve(
+    here,
+    '..',
+    'main',
+    'web',
+    ...(radioMHz ? [`radio${radioMHz}`] : []),
+    'index.html',
+  );
 
-const js = (
-  await build({
-    entryPoints: [src('app.ts')],
-    bundle: true,
-    minify: true,
-    format: 'iife',
-    target: 'es2018',
-    write: false,
-  })
-).outputFiles[0].text.trim();
+  const js = (
+    await build({
+      entryPoints: [src('app.ts')],
+      define: { RADIO_MHZ: String(radioMHz) },
+      bundle: true,
+      loader: { '.svg': 'text' },
+      minify: true,
+      format: 'iife',
+      target: 'es2018',
+      write: false,
+    })
+  ).outputFiles[0].text.trim();
 
-const css = (
-  await transform(readFileSync(src('style.css'), 'utf8'), {
-    loader: 'css',
-    minify: true,
-  })
-).code.trim();
+  const css = (
+    await transform(readFileSync(src('style.css'), 'utf8'), {
+      loader: 'css',
+      minify: true,
+    })
+  ).code.trim();
 
-const favicon =
-  'data:image/png;base64,' +
-  readFileSync(src('favicon.png')).toString('base64');
+  const favicon =
+    'data:image/png;base64,' +
+    readFileSync(src('favicon.png')).toString('base64');
 
-// Splice patterns are quote-tolerant so prettier may reformat src/index.html
-// (it quotes attributes) without breaking the build.
-let html = readFileSync(src('index.html'), 'utf8');
-html = html.replace(
-  /<link\s+rel=["']?stylesheet["']?[^>]*>/i,
-  `<style>${css}</style>`,
-);
-// Both uses: the <link rel=icon> in head and the logo <img> in the header.
-html = html.replace(/["']?\.\/favicon\.png["']?/g, `"${favicon}"`);
-html = html.replace(
-  /<script[^>]*src=["']?\.\/app\.ts["']?[^>]*><\/script>/i,
-  `<script>${js}</script>`,
-);
+  // Splice patterns are quote-tolerant so prettier may reformat src/index.html
+  // (it quotes attributes) without breaking the build.
+  let html = readFileSync(src('index.html'), 'utf8');
+  if (!radioMHz)
+    html = html.replace(/<!-- RADIO_BEGIN -->[\s\S]*?<!-- RADIO_END -->/g, '');
+  html = html.replace(
+    /<link\s+rel=["']?stylesheet["']?[^>]*>/i,
+    `<style>${css}</style>`,
+  );
+  // Both uses: the <link rel=icon> in head and the logo <img> in the header.
+  html = html.replace(/["']?\.\/favicon\.png["']?/g, `"${favicon}"`);
+  html = html.replace(
+    /<script[^>]*src=["']?\.\/app\.ts["']?[^>]*><\/script>/i,
+    `<script>${js}</script>`,
+  );
 
-// Fail loudly if a splice missed (e.g. a markup tweak renamed a placeholder),
-// rather than shipping a page that pulls /style.css or /app.ts the firmware no
-// longer serves.
-for (const [needle, what] of [
-  ['./style.css', 'CSS link'],
-  ['./app.ts', 'script src'],
-  ['./favicon.png', 'favicon src'],
-]) {
-  if (html.includes(needle)) {
-    throw new Error(`build: ${what} (${needle}) was not inlined`);
+  // Fail loudly if a splice missed (e.g. a markup tweak renamed a placeholder),
+  // rather than shipping a page that pulls /style.css or /app.ts the firmware no
+  // longer serves.
+  for (const [needle, what] of [
+    ['./style.css', 'CSS link'],
+    ['./app.ts', 'script src'],
+    ['./favicon.png', 'favicon src'],
+  ]) {
+    if (html.includes(needle)) {
+      throw new Error(`build: ${what} (${needle}) was not inlined`);
+    }
   }
+
+  html = await minify(html, {
+    collapseWhitespace: true,
+    removeComments: true,
+    removeAttributeQuotes: true,
+    collapseBooleanAttributes: true,
+    // app.ts / style.css are already minified by esbuild; don't double-process.
+    minifyJS: false,
+    minifyCSS: false,
+  });
+
+  mkdirSync(dirname(outFile), { recursive: true });
+  writeFileSync(outFile, html + '\n');
+  console.log(`wrote ${outFile} (${Buffer.byteLength(html)} bytes)`);
 }
-
-html = await minify(html, {
-  collapseWhitespace: true,
-  removeComments: true,
-  removeAttributeQuotes: true,
-  collapseBooleanAttributes: true,
-  // app.ts / style.css are already minified by esbuild; don't double-process.
-  minifyJS: false,
-  minifyCSS: false,
-});
-
-mkdirSync(dirname(outFile), { recursive: true });
-writeFileSync(outFile, html + '\n');
-console.log(`wrote ${outFile} (${Buffer.byteLength(html)} bytes)`);

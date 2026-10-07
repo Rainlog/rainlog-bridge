@@ -14,6 +14,7 @@
 #include "esp_timer.h"
 #include "http_util.h"
 #include "ota_update.h"
+#include "radio/radio.h"
 #include "session_auth.h"
 #include "wifi_link.h"
 
@@ -21,8 +22,13 @@ static const char *TAG = "config_server";
 
 // Big enough for the full form / config JSON with WU_MAP_MAX mappings, every
 // id/key at max length and (pathologically) every byte JSON-escaping to 6x.
+#if RAINLOG_RADIO
+#define BODY_MAX 8192
+#define PAGE_MAX 16384
+#else
 #define BODY_MAX 4096
 #define PAGE_MAX 8192
+#endif
 
 // The config page: one self-contained, null-terminated HTML document (CSS, JS,
 // and favicon all inlined) embedded at build time (main/CMakeLists.txt
@@ -232,8 +238,29 @@ char *config_server_config_json(void) {
                   i ? "," : "", (unsigned long)cfg->wu_map[i].gauge_id, wu_id,
                   wu_key);
   }
-  if (o > 0 && o < PAGE_MAX) {
-    o += snprintf(json + o, PAGE_MAX - o, "]}");
+#if RAINLOG_RADIO
+  if (o > 0 && o < PAGE_MAX)
+    o += snprintf(json + o, PAGE_MAX - o,
+                  "],\"radio_enabled\":%s,\"wifi_interception_enabled\":%s,"
+                  "\"wifi_interception_active\":%s,\"radio_map\":[",
+                  cfg->radio_enabled ? "true" : "false",
+                  cfg->wifi_interception_enabled ? "true" : "false",
+                  wifi_link_ap_enabled() ? "true" : "false");
+  for (unsigned i = 0; i < cfg->radio_map_count && o > 0 && o < PAGE_MAX; i++) {
+    const radio_mapping_t *m = &cfg->radio_map[i];
+    char key[sizeof(m->rainlog_key) * 6];
+    json_escape(m->rainlog_key, key, sizeof(key));
+    o += snprintf(json + o, PAGE_MAX - o,
+                  "%s{\"model\":%u,\"sensor_id\":%lu,\"channel\":%u,\"gauge_"
+                  "id\":%lu,\"rainlog_key\":\"%s\"}",
+                  i ? "," : "", m->model, (unsigned long)m->sensor_id,
+                  (unsigned char)m->channel, (unsigned long)m->gauge_id, key);
+  }
+#endif
+  if (o > 0 && o < PAGE_MAX) o += snprintf(json + o, PAGE_MAX - o, "]}");
+  if (o < 0 || o >= PAGE_MAX) {
+    free(json);
+    return NULL;
   }
   return json;
 }
@@ -245,6 +272,47 @@ static esp_err_t send_owned_json(httpd_req_t *req, char *json) {
   free(json);
   return err;
 }
+#if RAINLOG_RADIO
+char *config_server_radio_json(void) {
+  radio_status_t status;
+  radio_status(&status);
+  radio_sensor_t sensors[RADIO_SENSORS_MAX];
+  size_t count = radio_sensors(sensors, RADIO_SENSORS_MAX);
+  char *json = malloc(PAGE_MAX);
+  if (!json) return NULL;
+  int o = snprintf(json, PAGE_MAX,
+                   "{\"available\":%s,\"receiving\":%s,\"frequency_hz\":%lu,"
+                   "\"error\":%d,\"sensors\":[",
+                   status.available ? "true" : "false",
+                   status.receiving ? "true" : "false",
+                   (unsigned long)status.frequency_hz, status.error);
+  unsigned seen = 0;
+  int64_t now = esp_timer_get_time();
+  for (unsigned i = 0; i < count && o > 0 && o < PAGE_MAX; i++) {
+    const weather_packet_t *p = &sensors[i].reading.packet;
+    const radio_mapping_t *m =
+        config_find_radio_mapping(p->model, p->id, p->channel);
+    o += snprintf(
+        json + o, PAGE_MAX - o,
+        "%s{\"model\":%u,\"sensor_id\":%u,\"channel\":%u,\"age_s\":%"
+        "lld,\"gauge_id\":%lu,\"has_rain\":%s,\"rain_raw\":%u,\"packets\":%lu}",
+        seen++ ? "," : "", p->model, p->id, (unsigned char)p->channel,
+        (long long)((now - sensors[i].reading.received_us) / 1000000),
+        m ? (unsigned long)m->gauge_id : 0, p->has_rain ? "true" : "false",
+        p->rain_raw, (unsigned long)sensors[i].packets);
+  }
+  if (o > 0 && o < PAGE_MAX) o += snprintf(json + o, PAGE_MAX - o, "]}");
+  if (o < 0 || o >= PAGE_MAX) {
+    free(json);
+    return NULL;
+  }
+  return json;
+}
+static esp_err_t radio_handler(httpd_req_t *req) {
+  if (reject_unauthorized(req)) return ESP_OK;
+  return send_owned_json(req, config_server_radio_json());
+}
+#endif
 static esp_err_t config_handler(httpd_req_t *req) {
   if (reject_unauthorized(req)) return ESP_OK;
   return send_owned_json(req, config_server_config_json());
@@ -446,7 +514,71 @@ esp_err_t config_server_save_form(const char *body, const char **error) {
   }
   cfg.wu_map_count = n;
 
-  *error = ap_pass_is_default(cfg.ap_pass)
+#if RAINLOG_RADIO
+  // A marker distinguishes a radio form from older clients without radio
+  // fields.
+  if (http_util_form_get(body, "radio_form", tmp, sizeof(tmp))) {
+    bool has_interception_switch = !strcmp(tmp, "2");
+    cfg.radio_enabled =
+        http_util_form_get(body, "radio_enabled", tmp, sizeof(tmp)) ? 1 : 0;
+    if (has_interception_switch)
+      cfg.wifi_interception_enabled =
+          http_util_form_get(body, "wifi_interception_enabled", tmp,
+                             sizeof(tmp))
+              ? 1
+              : 0;
+    memset(cfg.radio_map, 0, sizeof(cfg.radio_map));
+    cfg.radio_map_count = 0;
+    for (unsigned i = 0; i < RADIO_MAP_MAX; i++) {
+      char name[24], model[16], id[24], channel[8], gauge[24], key[65];
+#define RADIO_FIELD(field, dest)                          \
+  do {                                                    \
+    snprintf(name, sizeof(name), "radio_%s%u", field, i); \
+    http_util_form_get(body, name, dest, sizeof(dest));   \
+  } while (0)
+      model[0] = id[0] = channel[0] = gauge[0] = key[0] = 0;
+      RADIO_FIELD("model", model);
+      RADIO_FIELD("id", id);
+      RADIO_FIELD("channel", channel);
+      RADIO_FIELD("gauge", gauge);
+      RADIO_FIELD("key", key);
+#undef RADIO_FIELD
+      if (!id[0] && !gauge[0] && !key[0]) continue;
+      radio_mapping_t *m = &cfg.radio_map[cfg.radio_map_count++];
+      // Sensor ID zero is valid; parse via the shared strict decimal parser.
+      m->sensor_id = config_parse_gauge_id(id, false);
+      if (strspn(id, "0123456789") != strlen(id) ||
+          (!m->sensor_id && strcmp(id, "0")) ||
+          (!strcmp(model, "0") && m->sensor_id > 127) ||
+          (strcmp(model, "0") && strcmp(model, "1"))) {
+        *error = "Invalid radio sensor ID or model";
+        return ESP_ERR_INVALID_ARG;
+      }
+      if (!strcmp(model, "1") && strlen(channel) != 1) {
+        *error = "Invalid radio channel";
+        return ESP_ERR_INVALID_ARG;
+      }
+      m->model = model[0] - '0';
+      m->channel = m->model == WEATHER_ACURITE_5N1 ? channel[0] : 0;
+      m->gauge_id = config_parse_gauge_id(gauge, false);
+      if (key[0])
+        snprintf(m->rainlog_key, sizeof(m->rainlog_key), "%s", key);
+      else
+        for (unsigned j = 0; j < prev->radio_map_count; j++) {
+          const radio_mapping_t *old = &prev->radio_map[j];
+          if (old->model == m->model && old->sensor_id == m->sensor_id &&
+              old->channel == m->channel && old->gauge_id == m->gauge_id)
+            snprintf(m->rainlog_key, sizeof(m->rainlog_key), "%s",
+                     old->rainlog_key);
+        }
+    }
+  }
+#endif
+  *error =
+#if RAINLOG_RADIO
+      cfg.wifi_interception_enabled &&
+#endif
+      ap_pass_is_default(cfg.ap_pass)
                ? "Please choose a Bridge Wi-Fi password (the default cannot be "
                  "kept)."
                : config_validate(&cfg);
@@ -529,14 +661,14 @@ char *config_server_clients_json(uint32_t peer) {
                   "\"hostname\":\"%s\",\"ip\":\"%s\","
                   "\"rssi\":%d,\"connected\":%s,\"age_s\":%lld,\"you\":%s,"
                   "\"rx\":%lu,\"rl\":%lu,\"wu\":%lu,\"err\":%u,"
-                  "\"rlrej\":\"%s\",\"wurej\":\"%s\"}",
+                  "\"rlrej\":\"%s\",\"wurej\":\"%s\",\"gauge_id\":%lu}",
                   i ? "," : "", mac, c->vendor, name, host, ip, c->rssi,
                   c->connected ? "true" : "false",
                   (long long)((now - c->last_seen_us) / 1000000),
                   (peer != 0 && c->ip.addr == peer) ? "true" : "false",
                   (unsigned long)c->rx_count, (unsigned long)c->fwd_count,
                   (unsigned long)c->wu_count, (unsigned)c->err_flags, rlrej,
-                  wurej);
+                  wurej, (unsigned long)c->gauge_id);
   }
   if (o > 0 && o < CLIENTS_JSON_MAX) {
     o += snprintf(json + o, CLIENTS_JSON_MAX - o, "]");
@@ -708,6 +840,11 @@ void config_server_start(void) {
   const httpd_uri_t logout = {.uri = "/logout",
                               .method = HTTP_POST,
                               .handler = session_auth_logout_handler};
+#if RAINLOG_RADIO
+  const httpd_uri_t radio = {
+      .uri = "/radio", .method = HTTP_GET, .handler = radio_handler};
+  ESP_ERROR_CHECK(httpd_register_uri_handler(server, &radio));
+#endif
   httpd_register_uri_handler(server, &page);
   httpd_register_uri_handler(server, &favicon);
   httpd_register_uri_handler(server, &config);

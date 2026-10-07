@@ -8,7 +8,7 @@ if(RAINLOG_DEBUG_CONSOLE)
     set_source_files_properties("vendor/duktape.c" PROPERTIES COMPILE_OPTIONS "-Wno-missing-field-initializers")
     target_compile_definitions(${COMPONENT_LIB} PUBLIC RAINLOG_DEBUG_CONSOLE=1)
     target_include_directories(${COMPONENT_LIB} PRIVATE "${PROJECT_DIR}/main"
-        "${PROJECT_DIR}/main/net" "${PROJECT_DIR}/main/forward" "${PROJECT_DIR}/main/stats" "${PROJECT_DIR}/main/ota" "${PROJECT_DIR}/main/ui")
+        "${PROJECT_DIR}/main/net" "${PROJECT_DIR}/main/forward" "${PROJECT_DIR}/main/stats" "${PROJECT_DIR}/main/ota" "${PROJECT_DIR}/main/ui" "${PROJECT_DIR}/main/radio")
 else()
     idf_component_register(INCLUDE_DIRS "include" REQUIRES ${console_dependencies})
 endif()

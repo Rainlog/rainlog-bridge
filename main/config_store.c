@@ -13,6 +13,7 @@
 #include "esp_log.h"
 #include "esp_mac.h"
 #include "nvs.h"
+#include "radio/weather_decode.h"
 
 static const char *TAG = "config";
 #define NS "bridge_cfg"
@@ -25,6 +26,10 @@ static bridge_config_t s_cfg;
 #define NUMBER_FIELD(name, max) \
   {#name, offsetof(bridge_config_t, name), sizeof(uint32_t), max}
 const config_field_t config_fields[] = {
+#if RAINLOG_RADIO
+    NUMBER_FIELD(radio_enabled, 1),
+    NUMBER_FIELD(wifi_interception_enabled, 1),
+#endif
     STRING_FIELD(sta_ssid),
     STRING_FIELD(sta_pass),
     STRING_FIELD(ap_ssid),
@@ -42,9 +47,12 @@ const size_t config_field_count =
     sizeof(config_fields) / sizeof(config_fields[0]);
 // NVS keys are limited to 15 bytes, independent of descriptive API names.
 static const char *field_keys[] = {
-    "sta_ssid", "sta_pass",  "ap_ssid",  "ap_pass",  "rl_host",
-    "wu_host",  "wu_path",   "ota_host", "ota_path", "disp_full",
-    "disp_dim", "disp_idle", "led_level"};
+#if RAINLOG_RADIO
+    "radio_enabled", "wifi_capture",
+#endif
+    "sta_ssid",      "sta_pass",     "ap_ssid",  "ap_pass",  "rl_host",
+    "wu_host",       "wu_path",      "ota_host", "ota_path", "disp_full",
+    "disp_dim",      "disp_idle",    "led_level"};
 _Static_assert(sizeof(field_keys) / sizeof(field_keys[0]) ==
                    sizeof(config_fields) / sizeof(config_fields[0]),
                "setting keys");
@@ -73,6 +81,33 @@ const char *config_validate(const bridge_config_t *cfg) {
   if (strpbrk(cfg->wu_update_path, "\r\n ?#") ||
       strpbrk(cfg->ota_manifest_path, "\r\n ?#"))
     return "invalid path";
+#if RAINLOG_RADIO
+  if (cfg->provisioned && !cfg->wifi_interception_enabled && !cfg->sta_ssid[0])
+    return "Home Wi-Fi required when Wi-Fi interception is disabled";
+  if (cfg->radio_map_count > RADIO_MAP_MAX) return "too many radio mappings";
+  for (unsigned i = 0; i < cfg->radio_map_count; i++) {
+    const radio_mapping_t *m = &cfg->radio_map[i];
+    bool supported = false;
+#if WEATHER_PROTOCOL_LACROSSE_TX5U
+    supported |=
+        m->model == WEATHER_LACROSSE_TX5U && m->sensor_id <= 127 && !m->channel;
+#endif
+#if WEATHER_PROTOCOL_ACURITE_IRIS
+    supported |= m->model == WEATHER_ACURITE_5N1 && m->sensor_id <= 4095 &&
+                 (m->channel == 'A' || m->channel == 'B' || m->channel == 'C');
+#endif
+    if (!supported || !m->gauge_id || !m->rainlog_key[0] ||
+        !memchr(m->rainlog_key, 0, sizeof(m->rainlog_key)))
+      return "invalid radio mapping";
+    for (unsigned j = 0; j < i; j++) {
+      const radio_mapping_t *other = &cfg->radio_map[j];
+      if ((other->model == m->model && other->sensor_id == m->sensor_id &&
+           other->channel == m->channel) ||
+          other->gauge_id == m->gauge_id)
+        return "duplicate radio sensor or gauge id";
+    }
+  }
+#endif
   if (cfg->wu_map_count > WU_MAP_MAX) return "too many WU mappings";
   for (unsigned i = 0; i < cfg->wu_map_count; i++) {
     const wu_mapping_t *m = &cfg->wu_map[i];
@@ -111,6 +146,12 @@ void config_load(void) {
   memset(s_cfg.wu_map, 0, sizeof(s_cfg.wu_map));
   s_cfg.wu_map_count = 0;
   s_cfg.provisioned = false;
+#if RAINLOG_RADIO
+  s_cfg.radio_enabled = 1;
+  s_cfg.wifi_interception_enabled = 0;
+  memset(s_cfg.radio_map, 0, sizeof(s_cfg.radio_map));
+  s_cfg.radio_map_count = 0;
+#endif
 
   nvs_handle_t h;
   if (nvs_open(NS, NVS_READONLY, &h) != ESP_OK) {
@@ -137,6 +178,15 @@ void config_load(void) {
     nvs_get_u8(h, "wu_n", &count);
     s_cfg.wu_map_count = count <= WU_MAP_MAX ? count : WU_MAP_MAX;
   }
+#if RAINLOG_RADIO
+  size_t radio_len = sizeof(s_cfg.radio_map);
+  if (nvs_get_blob(h, "radio_map", s_cfg.radio_map, &radio_len) == ESP_OK &&
+      radio_len == sizeof(s_cfg.radio_map)) {
+    uint8_t count = 0;
+    nvs_get_u8(h, "radio_n", &count);
+    s_cfg.radio_map_count = count <= RADIO_MAP_MAX ? count : 0;
+  }
+#endif
   uint8_t u;
   if (nvs_get_u8(h, "provd", &u) == ESP_OK) {
     s_cfg.provisioned = (u != 0);
@@ -195,6 +245,11 @@ esp_err_t config_update(const bridge_config_t *cfg) {
   if (err == ESP_OK)
     err = nvs_set_blob(h, "wu_map", cfg->wu_map, sizeof(cfg->wu_map));
   if (err == ESP_OK) err = nvs_set_u8(h, "wu_n", cfg->wu_map_count);
+#if RAINLOG_RADIO
+  if (err == ESP_OK)
+    err = nvs_set_blob(h, "radio_map", cfg->radio_map, sizeof(cfg->radio_map));
+  if (err == ESP_OK) err = nvs_set_u8(h, "radio_n", cfg->radio_map_count);
+#endif
   if (err == ESP_OK) err = nvs_set_u8(h, "provd", cfg->provisioned);
   if (err == ESP_OK) err = nvs_commit(h);
   nvs_close(h);
@@ -227,4 +282,26 @@ esp_err_t config_save(const bridge_config_t *cfg) {
   bridge_config_t provisioned = *cfg;
   provisioned.provisioned = true;
   return config_update(&provisioned);
+}
+
+#if RAINLOG_RADIO
+const radio_mapping_t *config_find_radio_mapping(uint8_t model,
+                                                 uint32_t sensor_id,
+                                                 char channel) {
+  for (unsigned i = 0; i < s_cfg.radio_map_count; i++) {
+    const radio_mapping_t *m = &s_cfg.radio_map[i];
+    if (m->model == model && m->sensor_id == sensor_id && m->channel == channel)
+      return m;
+  }
+  return NULL;
+}
+#endif
+
+bool config_wifi_interception_enabled(void) {
+#if RAINLOG_RADIO
+  // Keep first-time setup reachable before home Wi-Fi is configured.
+  return !s_cfg.provisioned || s_cfg.wifi_interception_enabled != 0;
+#else
+  return true;
+#endif
 }

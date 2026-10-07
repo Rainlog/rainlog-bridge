@@ -28,6 +28,8 @@ jobs:
     container: espressif/idf:v6.0.1
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       # config.h is gitignored (it holds local WiFi/PWS secrets). The example
       # is the committed template and is sufficient to compile: everything
@@ -67,5 +69,5 @@ jobs:
         working-directory: web
         run: npm ci && npm run build
 
-      - name: Fail if main/web/index.html is out of date
-        run: git diff --exit-code -- main/web/index.html
+      - name: Fail if embedded config pages are out of date
+        run: git diff --exit-code -- main/web/

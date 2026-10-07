@@ -73,7 +73,9 @@ static esp_err_t wu_upload_handler(httpd_req_t *req) {
   if (params != NULL) {
     ESP_LOGI(TAG, "captured upload (%u bytes)", (unsigned)strlen(params));
     uint32_t peer = http_util_peer_ip4(req);
-    ap_clients_note_upload(peer);
+    char station_id[64] = {0};
+    http_util_form_get(params, "ID", station_id, sizeof(station_id));
+    ap_clients_note_upload(peer, config_parse_gauge_id(station_id, true));
     forwarder_submit(params, peer);
     free(params);
   }
@@ -113,7 +115,7 @@ static void tls_capture_start(void) {
 }
 
 void capture_server_start(void) {
-  tls_capture_start();
+  if (config_wifi_interception_enabled()) tls_capture_start();
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
   config.lru_purge_enable = true;
   // Cap held sockets so the plain-HTTP server leaves room for the TLS server,
@@ -143,8 +145,10 @@ void capture_server_start(void) {
       .method = HTTP_POST,
       .handler = wu_upload_handler,
   };
-  httpd_register_uri_handler(s_server, &get_uri);
-  httpd_register_uri_handler(s_server, &post_uri);
+  if (config_wifi_interception_enabled()) {
+    httpd_register_uri_handler(s_server, &get_uri);
+    httpd_register_uri_handler(s_server, &post_uri);
+  }
   ESP_LOGI(TAG, "capture server up on port 80 %s",
            config_get()->wu_update_path);
 }

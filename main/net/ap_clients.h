@@ -1,7 +1,8 @@
 // Rainlog Wireless Bridge - SoftAP client registry.
 //
 // Remembers every device that joins the bridge's SoftAP (RAM only; resets on
-// reboot): MAC, connected state, last-seen time, and the last DHCP address.
+// reboot): MAC, connected state, last-seen time, last DHCP address, and the
+// last Rainlog station ID captured from a weather upload.
 // The config page's Devices tab reads this via GET /clients to show what is
 // on the bridge's WiFi and link to each device's own page.
 #pragma once
@@ -30,6 +31,7 @@ typedef struct {
   // esp_timer time of the device's last captured weather upload; 0 = none yet
   // this boot. The status screen lists devices that have forwarded.
   int64_t last_upload_us;
+  uint32_t gauge_id;   // last Rainlog station ID captured from this device
   uint32_t rx_count;   // weather uploads captured from this device (this boot)
   uint32_t fwd_count;  // of those, accepted by Rainlog (this boot)
   uint32_t wu_count;   // of those, relayed to Weather Underground (this boot)
@@ -61,8 +63,8 @@ int ap_clients_snapshot(ap_client_t *out, int max);
 
 // Record that the device currently holding this SoftAP address (network byte
 // order) just sent a weather upload. No-op if no tracked client has the
-// address.
-void ap_clients_note_upload(uint32_t ip4);
+// address. A nonzero gauge_id updates the remembered Rainlog station ID.
+void ap_clients_note_upload(uint32_t ip4, uint32_t gauge_id);
 
 // Record that an upload from the device holding this address was accepted by
 // Rainlog (possibly minutes after capture, via the retry buffer). Same no-op

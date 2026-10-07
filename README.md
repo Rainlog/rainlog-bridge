@@ -93,8 +93,9 @@ console that reports every 18 seconds will show its received count climbing
 steadily while the forwarded count rises only once per 5 minutes. That is
 working correctly.
 
-To keep uploading to Weather Underground as well, add a relay row on the setup
-page. It needs **three** values: your Rainlog station ID (`Rainlog12345`), your
+To keep uploading to Weather Underground as well, add a relay row under **Devices**.
+The station field offers known Rainlog IDs and also accepts manual entry.
+It needs **three** values: your Rainlog station ID (`Rainlog12345`), your
 WU station ID, and your WU key. A row missing any of them is silently ignored,
 so double check all three.
 
@@ -177,7 +178,9 @@ demo claiming 4MB. Check yours with `esptool flash-id`.
 **LILYGO T3 LoRa32 V1.6.1 (433 MHz SX1278).** Our board identifies as an
 ESP32-PICO-D4 with 4MB flash. Its 128x64 SSD1306 OLED uses I2C address `0x3C`,
 SDA GPIO21 and SCL GPIO22. It has a single-color status LED on GPIO25 and a
-BOOT button on GPIO0. The radio is present but reception is not implemented.
+BOOT button on GPIO0. The SX1278 supports receive-only La Crosse TX5U and AcuRite Iris OOK
+reception. See [weather radio reception](main/radio/README.md) for build
+options and console controls.
 
 Flash size fixes the partition layout and the layouts are not interchangeable,
 so there is one image stream per variant, keyed on `BOARD_ID` (`main/board.h`).
@@ -214,6 +217,7 @@ Native ESP-IDF, not Arduino. Every build runs inside Docker against a pinned
 
 ```sh
 cp main/config.example.h main/config.h   # once, before the first build
+git submodule update --init --recursive  # pinned SX127x radio driver
 ./build.sh                               # build the C6
 BOARD=lilygo ./build.sh                  # build the LILYGO
 PORT=/dev/ttyACM3 ./build.sh flash        # C6: build and flash
@@ -235,14 +239,15 @@ image is available, firmware compilation can run offline.
 
 ### Configuration web UI
 
-The setup page is a TypeScript + esbuild subproject in `web/`, built into a
-single self-contained `main/web/index.html` that the firmware embeds.
+The setup page is a TypeScript + esbuild subproject in `web/`, built into
+self-contained pages under `main/web/`. The firmware embeds the radio-enabled
+or radio-disabled page selected by its compiler flags.
 
 ```sh
 cd web && npm install && npm run build
 ```
 
-**The generated `main/web/index.html` must be committed**: the IDF image has no
+**The generated pages under `main/web/` must be committed**: the IDF image has no
 Node, so the firmware build never runs npm. CI fails if it is stale.
 
 ### Optional JavaScript debug console

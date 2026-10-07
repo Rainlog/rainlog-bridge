@@ -154,7 +154,7 @@ static ap_client_t *find_by_ip(uint32_t ip4) {
   return NULL;
 }
 
-void ap_clients_note_upload(uint32_t ip4) {
+void ap_clients_note_upload(uint32_t ip4, uint32_t gauge_id) {
   if (s_lock == NULL || ip4 == 0) {
     return;
   }
@@ -163,6 +163,7 @@ void ap_clients_note_upload(uint32_t ip4) {
   if (e != NULL) {
     e->last_upload_us = esp_timer_get_time();
     e->rx_count++;
+    if (gauge_id) e->gauge_id = gauge_id;
   }
   xSemaphoreGive(s_lock);
 }

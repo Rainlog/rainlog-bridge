@@ -1,7 +1,7 @@
 // Rainlog Wireless Bridge - WiFi host (SoftAP) + client (STA).
 //
 // Brings up AP+STA concurrently: the station joins our SoftAP while we uplink
-// to the home WiFi. This is the "passing data through" path.
+// to the home WiFi. Radio builds can disable interception and run STA-only.
 #pragma once
 
 #include <stdbool.h>
@@ -61,3 +61,6 @@ int wifi_link_ap_station_count(void);
 
 esp_netif_t *wifi_link_sta_netif(void);
 esp_netif_t *wifi_link_ap_netif(void);
+
+// Whether the Wi-Fi driver currently has the bridge AP enabled.
+bool wifi_link_ap_enabled(void);

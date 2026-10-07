@@ -136,7 +136,9 @@ static void on_got_ip(void *arg, esp_event_base_t base, int32_t id,
   // out the STA side (lwIP NAPT, CONFIG_LWIP_IPV4_NAPT). Weather consoles
   // need it for NTP / vendor clouds; WU uploads are still DNS-spoofed to the
   // bridge and captured. Harmless to re-run on every reconnect.
-  esp_err_t napt = esp_netif_napt_enable(s_ap_netif);
+  esp_err_t napt = config_wifi_interception_enabled()
+                       ? esp_netif_napt_enable(s_ap_netif)
+                       : ESP_OK;
   if (napt != ESP_OK) {
     ESP_LOGW(TAG, "NAPT enable failed: %s", esp_err_to_name(napt));
   }
@@ -221,9 +223,11 @@ void wifi_link_start(void) {
   // SoftAP channel and can leave the AP unable to accept associations.
   ap_cfg.ap.channel = 1;
 
-  ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
+  ESP_ERROR_CHECK(esp_wifi_set_mode(
+      config_wifi_interception_enabled() ? WIFI_MODE_APSTA : WIFI_MODE_STA));
   apply_sta_config(cfg->sta_ssid, cfg->sta_pass);
-  ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap_cfg));
+  if (config_wifi_interception_enabled())
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap_cfg));
   ESP_ERROR_CHECK(esp_wifi_start());
   // STA modem sleep: let the radio nap between beacons when the uplink is idle.
   // (SoftAP keeps the radio on overall, but this still trims STA-side power.)
@@ -362,3 +366,9 @@ int wifi_link_ap_station_count(void) { return s_ap_sta_count; }
 esp_netif_t *wifi_link_sta_netif(void) { return s_sta_netif; }
 
 esp_netif_t *wifi_link_ap_netif(void) { return s_ap_netif; }
+
+bool wifi_link_ap_enabled(void) {
+  wifi_mode_t mode;
+  return esp_wifi_get_mode(&mode) == ESP_OK &&
+         (mode == WIFI_MODE_AP || mode == WIFI_MODE_APSTA);
+}

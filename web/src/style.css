@@ -127,6 +127,11 @@ select:focus {
   font-weight: 600;
   cursor: pointer;
 }
+.pw .toggle:disabled {
+  background: #e2e5e9;
+  color: #858b93;
+  cursor: default;
+}
 .wurow .pw {
   margin: 0.4em 0;
 }
@@ -314,4 +319,84 @@ a.open {
   to {
     transform: rotate(360deg);
   }
+}
+
+.radio-row {
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 12px;
+  margin: 12px 0;
+}
+.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.check input {
+  width: auto;
+  min-height: 0;
+  padding: 0;
+}
+#radioStatus {
+  margin-top: 0.25em;
+}
+
+#radioDeviceList {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.8em;
+}
+.radio-card {
+  min-width: 0;
+  padding: 0.8em;
+  border: 1px solid #e2e9f2;
+  border-radius: 12px;
+  background: #fafcfe;
+  overflow-wrap: anywhere;
+}
+.radio-card h4 {
+  margin: 0 0 0.5em;
+}
+.radio-card .radio-row {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+.radio-card .mini {
+  width: 100%;
+}
+.radio-empty {
+  grid-column: 1 / -1;
+}
+
+.sensor-icon {
+  width: 48px;
+  height: 48px;
+  flex: 0 0 48px;
+  color: #1668c8;
+}
+.sensor-icon svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.sensor-heading {
+  display: flex;
+  align-items: center;
+  gap: 0.7em;
+}
+.sensor-heading h4 {
+  margin: 0;
+}
+
+.sensor-heading .sensor-identity {
+  margin: 0.2em 0 0;
+  font-size: 0.85em;
+  color: #667;
+}
+
+input, select, button {
+  font-family: inherit;
 }

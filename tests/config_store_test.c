@@ -8,7 +8,7 @@ struct entry {
   char key[16];
   unsigned char value[2048];
   size_t size;
-} entries[20];
+} entries[24];
 static int count, fail_commit;
 static struct entry *find(const char *key) {
   for (int i = 0; i < count; i++)
@@ -19,7 +19,7 @@ static int put(const char *key, const void *value, size_t size) {
   assert(strlen(key) <= 15 && size <= sizeof(entries[0].value));
   struct entry *e = find(key);
   if (!e) {
-    assert(count < 20);
+    assert(count < 24);
     e = &entries[count++];
     strcpy(e->key, key);
   }
@@ -96,6 +96,8 @@ int main(void) {
   assert(!cfg.provisioned && cfg.display_full_pct == 100 &&
          cfg.display_dim_after_s == 30);
   assert(!config_validate(&cfg));
+  assert(!cfg.wifi_interception_enabled && config_wifi_interception_enabled());
+  strcpy(cfg.sta_ssid, "test-network");
   cfg.display_dim_pct = 12;
   cfg.display_dim_after_s = 0;
   cfg.led_level = 0;
@@ -105,10 +107,28 @@ int main(void) {
   cfg.wu_map[0].gauge_id = 123;
   strcpy(cfg.wu_map[0].wu_id, "TEST");
   strcpy(cfg.wu_map[0].wu_key, "dummy");
+  cfg.radio_enabled = 0;
+  cfg.radio_map_count = 1;
+  cfg.radio_map[0].sensor_id = 4;
+  cfg.radio_map[0].gauge_id = 321;
+  strcpy(cfg.radio_map[0].rainlog_key, "test-radio-key");
   assert(config_update(&cfg) == 0);
   config_load();
   assert(!memcmp(&cfg, config_get(), sizeof(cfg)));
   assert(config_find_wu_mapping(123) && !config_find_wu_mapping(124));
+  assert(config_find_radio_mapping(0, 4, 0)->gauge_id == 321);
+  assert(!config_find_radio_mapping(0, 5, 0));
+  cfg.radio_map[1] = cfg.radio_map[0];
+  cfg.radio_map_count = 2;
+  assert(config_validate(&cfg));
+  cfg = *config_get();
+  cfg.radio_map[0].model = 1;
+  cfg.radio_map[0].channel = 'Z';
+  assert(config_validate(&cfg));
+  cfg = *config_get();
+  cfg.radio_map[0].rainlog_key[0] = 0;
+  assert(config_validate(&cfg));
+  cfg = *config_get();
   cfg.display_dim_pct = 101;
   assert(config_validate(&cfg) && config_update(&cfg) == ESP_ERR_INVALID_ARG);
   cfg = *config_get();
@@ -128,6 +148,7 @@ int main(void) {
   fail_commit = 0;
   cfg = *config_get();
   assert(config_save(&cfg) == 0 && config_is_provisioned());
+  assert(!config_wifi_interception_enabled());
   config_load();
   assert(config_is_provisioned());
   assert(config_parse_gauge_id("Rainlog4294967295", true) == UINT32_MAX);

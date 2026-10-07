@@ -23,6 +23,7 @@
 #include "fs.h"
 #include "nvs_flash.h"
 #include "ota_update.h"
+#include "radio.h"
 #include "status_led.h"
 #include "time_sync.h"
 #include "ui.h"
@@ -73,11 +74,12 @@ void app_main(void) {
   wifi_link_start();
   ap_clients_init();  // after wifi_link_start: needs the default event loop
   time_sync_start();
-  dns_server_start();
+  if (config_wifi_interception_enabled()) dns_server_start();
   forwarder_init();
   capture_server_start();
   config_server_start();
   ota_update_start();
+  radio_start();
   debug_console_start();
 
   // 1s tick so the LED leaves "provisioning" promptly once the uplink is up;

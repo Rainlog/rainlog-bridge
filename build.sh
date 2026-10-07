@@ -11,8 +11,8 @@ set -euo pipefail
 IMAGE=rainlog-wireless-bridge-idf
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 case "${BOARD:-c6}" in
-  c6) target=esp32c6; build_dir=build; config=sdkconfig; defaults=sdkconfig.defaults ;;
-  lilygo) target=esp32; build_dir=build-lilygo; config=sdkconfig.lilygo; defaults=sdkconfig.lilygo.defaults ;;
+  c6) default_radio=0; target=esp32c6; build_dir=build; config=sdkconfig; defaults=sdkconfig.defaults ;;
+  lilygo) default_radio=1; target=esp32; build_dir=build-lilygo; config=sdkconfig.lilygo; defaults=sdkconfig.lilygo.defaults ;;
   *) echo "Unknown BOARD: use c6 or lilygo" >&2; exit 1 ;;
 esac
 
@@ -22,13 +22,19 @@ case "${DEBUG_CONSOLE:-0}" in
   *) echo "DEBUG_CONSOLE must be 0 or 1" >&2; exit 1 ;;
 esac
 
+case "${RADIO:-$default_radio}" in
+  0) radio=OFF ;;
+  1) radio=ON ;;
+  *) echo "RADIO must be 0 or 1" >&2; exit 1 ;;
+esac
+
 # No COPY instructions: don't send local demos, secrets or build caches.
 docker build -t "$IMAGE" - < "$PROJECT_DIR/Dockerfile"
 
 args=("$@")
 [[ ${#args[@]} -gt 0 ]] || args=(build)
 options=(--rm -v "$PROJECT_DIR":/project -e "IDF_TARGET=$target")
-idf_args=(-D "RAINLOG_DEBUG_CONSOLE=$debug_console" -B "$build_dir" -D "SDKCONFIG=/project/$config"
+idf_args=(-D "RAINLOG_RADIO=$radio" -D "RAINLOG_DEBUG_CONSOLE=$debug_console" -B "$build_dir" -D "SDKCONFIG=/project/$config"
           -D "SDKCONFIG_DEFAULTS=/project/$defaults")
 if [[ -n "${PORT:-}" ]]; then
   device=$(readlink -f "$PORT")

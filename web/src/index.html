@@ -25,15 +25,25 @@
 <div class=row><button type=button id=testBtn class=mini>Test connection</button></div>
 <div id=tstat></div>
 <h3>Bridge Wi-Fi</h3>
+<!-- RADIO_BEGIN -->
+<label class=check><input type=checkbox name=wifi_interception_enabled id=wifiInterceptionEnabled>Enable Wi-Fi interception</label>
+<p class=hint>Host Bridge Wi-Fi for station consoles. Home Wi-Fi stays connected when this is off.</p>
+<!-- RADIO_END -->
+<fieldset id=bridgeWifiFields style="border:0;padding:0;margin:0;min-width:0">
 <label>Network name (this device)</label>
 <input name=ap_ssid placeholder="Network name">
 <label>Password</label>
 <input name=ap_pass type=password placeholder="(unchanged)">
 <p class=hint>Also unlocks this page from your home network: browse to the bridge's Home IP (shown on its screen) and sign in with this password.</p>
-<h3>Weather Underground</h3>
-<p class=hint>Optional. Relay each gauge to a Weather Underground station. The console keeps sending its Rainlog credentials; the bridge maps the Rainlog station ID to these WU credentials.</p>
-<div id=wuRows></div>
-<button type=button id=addBtn class=mini>Add forward</button>
+</fieldset>
+<!-- RADIO_BEGIN -->
+<section id=radioSetup>
+<h3>Weather radio</h3>
+<label class=check><input type=checkbox name=radio_enabled id=radioEnabled checked>Enable radio reception</label>
+<input type=hidden name=radio_form value=2>
+<p id=radioStatus class=small>Reading radio status...</p>
+</section>
+<!-- RADIO_END -->
 <button type=submit>Save &amp; reboot bridge</button>
 </form>
 </div>
@@ -43,10 +53,26 @@
 <div class=row><button type=button id=otaCheckBtn class=mini>Check for updates</button><button type=button id=otaApplyBtn class=mini hidden>Update now</button></div>
 </div>
 <div id=viewDevices hidden>
-<h3>Connected devices</h3>
+<section id=wifiDevices>
+<h3>Wi-Fi devices</h3>
 <p class=hint>Devices on the bridge's Wi-Fi. Open visits a device's own page (your weather station's settings live there).</p>
 <div id=devList></div>
 <p id=devEmpty class=small hidden></p>
+</section>
+<!-- RADIO_BEGIN -->
+<section id=radioDevices>
+<h3>Radio devices</h3>
+<p id=radioDeviceStatus class=small></p>
+<div id=radioRows><div id=radioDeviceList></div></div>
+<p class=hint>Mappings are saved here. Radio rainfall forwarding is still being developed.</p>
+
+</section>
+<!-- RADIO_END -->
+<h3>Weather Underground</h3>
+<p class=hint>Optional. Relay each gauge to a Weather Underground station. The console keeps sending its Rainlog credentials; the bridge maps the Rainlog station ID to these WU credentials.</p>
+<div id=wuRows></div>
+<button type=button id=addBtn class=mini>Add forward</button>
+<button type=submit form=form>Save &amp; reboot bridge</button>
 </div>
 </div>
 <script type=module src=./app.ts></script>
