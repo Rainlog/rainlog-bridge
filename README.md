@@ -245,6 +245,59 @@ cd web && npm install && npm run build
 **The generated `main/web/index.html` must be committed**: the IDF image has no
 Node, so the firmware build never runs npm. CI fails if it is stale.
 
+### Optional JavaScript debug console
+
+Normal builds contain serial logs only. Enable the MeshCore-style Duktape
+console with `DEBUG_CONSOLE=1`; debug builds use separate output/configuration
+files (`build-lilygo-debug/`, `sdkconfig.lilygo.debug`, or the C6 equivalents).
+
+```sh
+BOARD=lilygo DEBUG_CONSOLE=1 ./build.sh
+BOARD=lilygo DEBUG_CONSOLE=1 PORT=/dev/serial/by-id/<device> ./build.sh app-flash
+BOARD=lilygo DEBUG_CONSOLE=1 PORT=/dev/serial/by-id/<device> ./build.sh monitor
+```
+
+Send newline-terminated commands at 115200 baud over the board's existing USB
+connection. The LILYGO uses UART0; the C6 uses native USB serial/JTAG.
+
+```text
+js 1 + 2
+js JSON.stringify(hw.heap())
+js JSON.stringify(hw.wifi())
+js JSON.stringify(hw.stats())
+js hw.millis()
+js hw.gpio(0)
+js print("hello")
+js off
+```
+
+Variables persist between commands. `js off` frees the engine, which starts
+again on the next expression. Commands are limited to 2048 bytes and 200 ms of
+metered execution, matching MeshCore. Built-in objects and strings are stored
+in flash. Engine allocations are capped at 48 KiB of internal RAM; errors
+release the engine.
+
+The enabled console provides local administrative access:
+
+```text
+js settings.get()
+js settings.set({display_dim_pct:10, display_dim_after_s:60})
+js web.scanLive()
+js web.clients()
+js web.rename("AA:BB:CC:DD:EE:FF", "Weather station")
+js web.otaStatus()
+js web.reboot()
+```
+
+`settings.get()` includes Wi-Fi passwords and WU keys. Partial updates persist
+Wi-Fi settings, WU mappings, host/path overrides, brightness/dimming and LED
+level. Display/LED tuning applies immediately; reboot to apply network changes.
+The console also exposes Wi-Fi testing, browser-style saves, OTA check/install,
+factory reset, stats clearing and log levels. Hardware pins and fonts remain
+compile-time choices reported by `hw.buildInfo()`. See
+[console reference](components/debug_console/README.md) for all calls, settings,
+limits and source provenance.
+
 ### Display backends
 
 Both panels use ESP-IDF's built-in `esp_lcd` drivers. `main/ui/display_st7789.c`

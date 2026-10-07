@@ -7,7 +7,6 @@
 #include <time.h>
 
 #include "ap_clients.h"
-#include "config.h"
 #include "config_store.h"
 #include "esp_app_desc.h"
 #include "esp_log.h"
@@ -291,8 +290,8 @@ static bool try_rainlog(const char *raw_query, uint32_t src_ip) {
     rl_send = rl_query;
   }
   char body[64];
-  bool ok = https_get(CFG_RAINLOG_HOST, CFG_WU_UPDATE_PATH, rl_send, body,
-                      sizeof(body));
+  bool ok = https_get(config_get()->rainlog_host, config_get()->wu_update_path,
+                      rl_send, body, sizeof(body));
   bool accepted = ok && strstr(body, "success") != NULL;
   s_last_upload_us = esp_timer_get_time();
   if (accepted) {
@@ -346,8 +345,9 @@ static bool try_wu(const char *raw_query, uint32_t src_ip) {
   }
   char body[64];
   int status = 0;
-  bool transport = http_util_https_get(CFG_WU_HOST, CFG_WU_UPDATE_PATH,
-                                       wu_query, body, sizeof(body), &status);
+  bool transport =
+      http_util_https_get(config_get()->wu_host, config_get()->wu_update_path,
+                          wu_query, body, sizeof(body), &status);
   bool accepted = transport && status == 200 && strstr(body, "success") != NULL;
   if (accepted) {
     upload_stats_record_success(UPLOAD_TARGET_WU);

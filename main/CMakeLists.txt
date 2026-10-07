@@ -41,6 +41,7 @@ idf_component_register(
         "input"
         "ui"
     REQUIRES
+        debug_console
         nvs_flash
         esp_wifi
         esp_netif

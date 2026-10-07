@@ -1,5 +1,6 @@
 #include "config_server.h"
 
+#include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -200,10 +201,7 @@ static esp_err_t favicon_handler(httpd_req_t *req) {
 // returned (the page shows it behind a Show toggle) - it is a per-station
 // upload key, not a network credential, and the page itself is already gated
 // (SoftAP side or signed-in LAN session).
-static esp_err_t config_handler(httpd_req_t *req) {
-  if (reject_unauthorized(req)) {
-    return ESP_OK;
-  }
+char *config_server_config_json(void) {
   const bridge_config_t *cfg = config_get();
   // Worst case every byte escapes to "\u00XX" (6x).
   char sta_ssid[sizeof(cfg->sta_ssid) * 6];
@@ -213,7 +211,7 @@ static esp_err_t config_handler(httpd_req_t *req) {
 
   char *json = malloc(PAGE_MAX);
   if (json == NULL) {
-    return ESP_ERR_NO_MEM;
+    return NULL;
   }
   // ap_ip lets the page tell which side it is viewed from (device links only
   // work for viewers on the bridge's own WiFi).
@@ -237,10 +235,19 @@ static esp_err_t config_handler(httpd_req_t *req) {
   if (o > 0 && o < PAGE_MAX) {
     o += snprintf(json + o, PAGE_MAX - o, "]}");
   }
+  return json;
+}
+
+static esp_err_t send_owned_json(httpd_req_t *req, char *json) {
+  if (!json) return ESP_ERR_NO_MEM;
   httpd_resp_set_type(req, "application/json");
   esp_err_t err = httpd_resp_sendstr(req, json);
   free(json);
   return err;
+}
+static esp_err_t config_handler(httpd_req_t *req) {
+  if (reject_unauthorized(req)) return ESP_OK;
+  return send_owned_json(req, config_server_config_json());
 }
 
 // The /test handler responds first, then kicks the actual connect via this
@@ -318,11 +325,10 @@ static esp_err_t teststatus_handler(httpd_req_t *req) {
 // Build + send a JSON array of unique networks as {"ssid":..,"rssi":..}, with
 // the strongest signal per SSID. Heap buffers (not stack): ~3KB of aps + json
 // would overflow the httpd task stack.
-static esp_err_t send_scan_json(httpd_req_t *req, const wifi_ap_record_t *aps,
-                                int n) {
+static char *scan_json(const wifi_ap_record_t *aps, int n) {
   char *json = malloc(SCAN_JSON_MAX);
   if (json == NULL) {
-    return ESP_ERR_NO_MEM;
+    return NULL;
   }
   size_t o = 0;
   json[o++] = '[';
@@ -359,53 +365,33 @@ static esp_err_t send_scan_json(httpd_req_t *req, const wifi_ap_record_t *aps,
   }
   json[o++] = ']';
   json[o] = '\0';
-  httpd_resp_set_type(req, "application/json");
-  esp_err_t err = httpd_resp_sendstr(req, json);
-  free(json);
-  return err;
+  return json;
+}
+
+char *config_server_scan_json(bool live) {
+  wifi_ap_record_t *aps = malloc(SCAN_AP_MAX * sizeof(*aps));
+  if (!aps) return NULL;
+  int n = live ? wifi_link_scan_live(aps, SCAN_AP_MAX)
+               : wifi_link_cached_aps(aps, SCAN_AP_MAX);
+  char *json = scan_json(aps, n);
+  free(aps);
+  return json;
 }
 
 // GET /scan: cached SSID list (instant, never disrupts the AP).
 static esp_err_t scan_handler(httpd_req_t *req) {
-  if (reject_unauthorized(req)) {
-    return ESP_OK;
-  }
-  wifi_ap_record_t *aps = malloc(SCAN_AP_MAX * sizeof(wifi_ap_record_t));
-  if (aps == NULL) {
-    return ESP_ERR_NO_MEM;
-  }
-  int n = wifi_link_cached_aps(aps, SCAN_AP_MAX);
-  esp_err_t err = send_scan_json(req, aps, n);
-  free(aps);
-  return err;
+  if (reject_unauthorized(req)) return ESP_OK;
+  return send_owned_json(req, config_server_scan_json(false));
 }
 
 // GET /scanlive: on-demand live scan (silences the radio ~1-2s; the page covers
 // it with a spinner). Refreshes the list even while connected.
 static esp_err_t scanlive_handler(httpd_req_t *req) {
-  if (reject_unauthorized(req)) {
-    return ESP_OK;
-  }
-  wifi_ap_record_t *aps = malloc(SCAN_AP_MAX * sizeof(wifi_ap_record_t));
-  if (aps == NULL) {
-    return ESP_ERR_NO_MEM;
-  }
-  int n = wifi_link_scan_live(aps, SCAN_AP_MAX);
-  esp_err_t err = send_scan_json(req, aps, n);
-  free(aps);
-  return err;
+  if (reject_unauthorized(req)) return ESP_OK;
+  return send_owned_json(req, config_server_scan_json(true));
 }
 
-static esp_err_t save_handler(httpd_req_t *req) {
-  if (reject_unauthorized(req)) {
-    return ESP_OK;
-  }
-  char *body = http_util_read_body(req, BODY_MAX);
-  if (body == NULL) {
-    httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad form");
-    return ESP_OK;
-  }
-
+esp_err_t config_server_save_form(const char *body, const char **error) {
   // Start from current config so blank password fields keep existing secrets.
   bridge_config_t cfg = *config_get();
   char tmp[65];
@@ -459,31 +445,39 @@ static esp_err_t save_handler(httpd_req_t *req) {
     n++;
   }
   cfg.wu_map_count = n;
-  free(body);
 
-  // Require a non-default Bridge WiFi password: the shipped default is printed
-  // on the LCD, so keeping it would leave the bridge AP open to anyone nearby.
-  if (ap_pass_is_default(cfg.ap_pass)) {
-    return send_error_page(
-        req,
-        "Please choose a Bridge Wi-Fi password (the default can't be kept).");
-  }
-  if (strlen(cfg.ap_pass) < 8) {
-    return send_error_page(
-        req, "Bridge Wi-Fi password must be at least 8 characters.");
-  }
-
+  *error = ap_pass_is_default(cfg.ap_pass)
+               ? "Please choose a Bridge Wi-Fi password (the default cannot be "
+                 "kept)."
+               : config_validate(&cfg);
+  if (*error) return ESP_ERR_INVALID_ARG;
   esp_err_t err = config_save(&cfg);
+  if (err != ESP_OK) *error = "save failed";
+  return err;
+}
+void config_server_restart(void) {
+  // Give HTTP or serial responses 1.5 s to flush before applying Wi-Fi changes.
+  esp_timer_stop(s_restart_timer);
+  esp_timer_start_once(s_restart_timer, 1500 * 1000);
+}
+static esp_err_t save_handler(httpd_req_t *req) {
+  if (reject_unauthorized(req)) return ESP_OK;
+  char *body = http_util_read_body(req, BODY_MAX);
+  if (!body) {
+    httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad form");
+    return ESP_OK;
+  }
+  const char *error = NULL;
+  esp_err_t err = config_server_save_form(body, &error);
+  free(body);
+  if (err == ESP_ERR_INVALID_ARG) return send_error_page(req, error);
   if (err != ESP_OK) {
-    ESP_LOGE(TAG, "config_save failed: %s", esp_err_to_name(err));
     httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "save failed");
     return ESP_OK;
   }
   httpd_resp_set_type(req, "text/html");
   httpd_resp_sendstr(req, SAVED_PAGE);
-  // Reboot shortly so the response flushes first; new WiFi config applies on
-  // the fresh boot.
-  esp_timer_start_once(s_restart_timer, 1500 * 1000);
+  config_server_restart();
   return ESP_OK;
 }
 
@@ -492,7 +486,8 @@ static void restart_cb(void *arg) {
   esp_restart();
 }
 
-#define CLIENTS_JSON_MAX 6144
+// Eight rows can exceed 6 KiB when names/hostnames/rejection text all escape.
+#define CLIENTS_JSON_MAX 12288
 
 // GET /clients: the devices on the bridge's SoftAP, for the page's Devices
 // tab. Each row: MAC, OUI vendor label, user-given name, DHCP-announced
@@ -502,18 +497,14 @@ static void restart_cb(void *arg) {
 // (rx = captured, rl = accepted by Rainlog, wu = relayed to WU) and the
 // sticky AP_CLIENT_ERR_* flags. name/hostname originate outside the
 // firmware, so they are JSON-escaped; the rest is firmware-formatted.
-static esp_err_t clients_handler(httpd_req_t *req) {
-  if (reject_unauthorized(req)) {
-    return ESP_OK;
-  }
+char *config_server_clients_json(uint32_t peer) {
   ap_client_t list[AP_CLIENTS_MAX];
   int n = ap_clients_snapshot(list, AP_CLIENTS_MAX);
-  uint32_t peer = http_util_peer_ip4(req);
   int64_t now = esp_timer_get_time();
 
   char *json = malloc(CLIENTS_JSON_MAX);
   if (json == NULL) {
-    return ESP_ERR_NO_MEM;
+    return NULL;
   }
   int o = snprintf(json, CLIENTS_JSON_MAX, "[");
   for (int i = 0; i < n && o > 0 && o < CLIENTS_JSON_MAX; i++) {
@@ -550,16 +541,32 @@ static esp_err_t clients_handler(httpd_req_t *req) {
   if (o > 0 && o < CLIENTS_JSON_MAX) {
     o += snprintf(json + o, CLIENTS_JSON_MAX - o, "]");
   }
-  httpd_resp_set_type(req, "application/json");
-  esp_err_t err = httpd_resp_sendstr(req, json);
-  free(json);
-  return err;
+  return json;
+}
+
+static esp_err_t clients_handler(httpd_req_t *req) {
+  if (reject_unauthorized(req)) return ESP_OK;
+  return send_owned_json(req,
+                         config_server_clients_json(http_util_peer_ip4(req)));
 }
 
 // Parse "AA:BB:CC:DD:EE:FF" into 6 bytes. Returns false on malformed input.
 static bool parse_mac(const char *s, uint8_t out[6]) {
+  if (strlen(s) != 17) return false;
+  for (int i = 0; i < 17; i++) {
+    if (i % 3 == 2) {
+      if (s[i] != ':') return false;
+    } else if (!isxdigit((unsigned char)s[i]))
+      return false;
+  }
   return sscanf(s, "%2hhx:%2hhx:%2hhx:%2hhx:%2hhx:%2hhx", &out[0], &out[1],
                 &out[2], &out[3], &out[4], &out[5]) == 6;
+}
+esp_err_t config_server_rename(const char *mac_string, const char *name) {
+  uint8_t mac[6];
+  if (!parse_mac(mac_string, mac) || strlen(name) > 32)
+    return ESP_ERR_INVALID_ARG;
+  return ap_clients_set_name(mac, name);
 }
 
 // POST /rename: set the user-given name for a device (form fields mac, name;
@@ -581,12 +588,13 @@ static esp_err_t rename_handler(httpd_req_t *req) {
   }
   free(body);
 
-  uint8_t mac[6];
-  if (!has_mac || !parse_mac(mac_str, mac)) {
+  esp_err_t err =
+      has_mac ? config_server_rename(mac_str, name) : ESP_ERR_INVALID_ARG;
+  if (err == ESP_ERR_INVALID_ARG) {
     httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad mac");
     return ESP_OK;
   }
-  if (ap_clients_set_name(mac, name) != ESP_OK) {
+  if (err != ESP_OK) {
     httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "save failed");
     return ESP_OK;
   }

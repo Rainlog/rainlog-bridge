@@ -1,11 +1,9 @@
 // Rainlog Wireless Bridge - processed-message stats.
 //
 // Tracks uploads successfully forwarded to each upstream target (Rainlog
-// always, the optional Weather Underground relay when configured) so the UI
-// can show rolling 24h counts plus lifetime totals. These live in RAM and
-// reset on reboot. Optional NVS persistence (the totals restored at boot, the
-// 24h windows re-anchored after SNTP sync) is compiled out by default to
-// avoid flash wear; enable with -DSTATS_PERSIST=1 (see upload_stats.c).
+// always, optional Weather Underground relay), with rolling 24h counts and
+// lifetime totals. LittleFS persistence is enabled by default; compile with
+// -DSTATS_PERSIST=0 to keep counts only in RAM.
 //
 // Symbols are prefixed `upload_stats_` rather than `stats_` because lwip
 // defines a `stats_init()` macro (lwip/stats.h), pulled in transitively by the

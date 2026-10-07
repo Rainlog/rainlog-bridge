@@ -12,6 +12,7 @@
 #include "capture_server.h"
 #include "config_server.h"
 #include "config_store.h"
+#include "debug_console.h"
 #include "dns_server.h"
 #include "esp_log.h"
 #include "esp_pm.h"
@@ -58,12 +59,12 @@ static void init_power_save(void) {
 void app_main(void) {
   ESP_LOGI(TAG, "Rainlog Wireless Bridge starting");
 
-  status_led_init();
-  status_led_set_provisioning(true);  // until the uplink is up
   init_nvs();
   fs_mount();           // LittleFS for persisted stats (formats on first boot)
   upload_stats_init();  // after fs_mount: loads the persisted total/24h window
   config_load();
+  status_led_init();
+  status_led_set_provisioning(true);  // until the uplink is up
   activity_init();
   init_power_save();
   button_init();
@@ -77,6 +78,7 @@ void app_main(void) {
   capture_server_start();
   config_server_start();
   ota_update_start();
+  debug_console_start();
 
   // 1s tick so the LED leaves "provisioning" promptly once the uplink is up;
   // the status heartbeat logs once a minute to keep the console readable.

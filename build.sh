@@ -4,6 +4,7 @@
 #   BOARD=lilygo ./build.sh
 #   PORT=/dev/serial/by-id/<device> ./build.sh flash
 #   BOARD=lilygo PORT=/dev/serial/by-id/<device> ./build.sh flash
+#   BOARD=lilygo DEBUG_CONSOLE=1 ./build.sh
 # Other arguments are passed to idf.py. Flash requires an explicit port.
 set -euo pipefail
 
@@ -15,13 +16,19 @@ case "${BOARD:-c6}" in
   *) echo "Unknown BOARD: use c6 or lilygo" >&2; exit 1 ;;
 esac
 
+case "${DEBUG_CONSOLE:-0}" in
+  0) debug_console=OFF ;;
+  1) debug_console=ON; build_dir+=-debug; config+=.debug ;;
+  *) echo "DEBUG_CONSOLE must be 0 or 1" >&2; exit 1 ;;
+esac
+
 # No COPY instructions: don't send local demos, secrets or build caches.
 docker build -t "$IMAGE" - < "$PROJECT_DIR/Dockerfile"
 
 args=("$@")
 [[ ${#args[@]} -gt 0 ]] || args=(build)
 options=(--rm -v "$PROJECT_DIR":/project -e "IDF_TARGET=$target")
-idf_args=(-B "$build_dir" -D "SDKCONFIG=/project/$config"
+idf_args=(-D "RAINLOG_DEBUG_CONSOLE=$debug_console" -B "$build_dir" -D "SDKCONFIG=/project/$config"
           -D "SDKCONFIG_DEFAULTS=/project/$defaults")
 if [[ -n "${PORT:-}" ]]; then
   device=$(readlink -f "$PORT")

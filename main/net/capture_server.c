@@ -4,7 +4,7 @@
 #include <string.h>
 
 #include "ap_clients.h"
-#include "config.h"
+#include "config_store.h"
 #include "esp_http_server.h"
 #include "esp_https_server.h"
 #include "esp_log.h"
@@ -101,10 +101,10 @@ static void tls_capture_start(void) {
     ESP_LOGE(TAG, "httpd_ssl_start failed: %s", esp_err_to_name(err));
     return;
   }
-  const httpd_uri_t get_uri = {.uri = CFG_WU_UPDATE_PATH,
+  const httpd_uri_t get_uri = {.uri = config_get()->wu_update_path,
                                .method = HTTP_GET,
                                .handler = wu_upload_handler};
-  const httpd_uri_t post_uri = {.uri = CFG_WU_UPDATE_PATH,
+  const httpd_uri_t post_uri = {.uri = config_get()->wu_update_path,
                                 .method = HTTP_POST,
                                 .handler = wu_upload_handler};
   httpd_register_uri_handler(s_tls_server, &get_uri);
@@ -134,16 +134,17 @@ void capture_server_start(void) {
   }
 
   const httpd_uri_t get_uri = {
-      .uri = CFG_WU_UPDATE_PATH,
+      .uri = config_get()->wu_update_path,
       .method = HTTP_GET,
       .handler = wu_upload_handler,
   };
   const httpd_uri_t post_uri = {
-      .uri = CFG_WU_UPDATE_PATH,
+      .uri = config_get()->wu_update_path,
       .method = HTTP_POST,
       .handler = wu_upload_handler,
   };
   httpd_register_uri_handler(s_server, &get_uri);
   httpd_register_uri_handler(s_server, &post_uri);
-  ESP_LOGI(TAG, "capture server up on port 80 %s", CFG_WU_UPDATE_PATH);
+  ESP_LOGI(TAG, "capture server up on port 80 %s",
+           config_get()->wu_update_path);
 }

@@ -26,13 +26,6 @@ static const char *TAG = "ui";
 #define REFRESH_MS 1000
 #define RESET_REFRESH_MS 80  // smooth countdown while the button is held
 
-// Backlight dims to BL_DIM_PCT after BL_DIM_AFTER_US with no activity, and
-// returns to full on the next activity (cuts heat/power when no one is
-// looking).
-#define BL_FULL_PCT 100
-#define BL_DIM_PCT 6
-#define BL_DIM_AFTER_US (30 * 1000 * 1000)
-
 #if BOARD_DISPLAY_SSD1306
 #include "oled_logo.h"
 #define OLED_TEXT_X (OLED_LOGO_W + 1 + GLYPH)
@@ -121,7 +114,7 @@ static void ui_task(void *arg) {
     // threshold; holding through it erases settings and reboots.
     uint32_t held = button_held_ms();
     if (held >= RESET_ARM_MS) {
-      display_set_backlight(BL_FULL_PCT);
+      display_set_backlight(config_get()->display_full_pct);
       display_clear(COLOR_BLACK);
 #if BOARD_DISPLAY_SSD1306
       oled_draw(held);
@@ -159,7 +152,12 @@ static void ui_task(void *arg) {
 
     // Dim the backlight when idle (no recent activity: button or settings).
     int64_t idle_us = esp_timer_get_time() - activity_last_us();
-    display_set_backlight(idle_us > BL_DIM_AFTER_US ? BL_DIM_PCT : BL_FULL_PCT);
+    const bridge_config_t *cfg = config_get();
+    display_set_backlight(cfg->display_dim_after_s &&
+                                  idle_us > (int64_t)cfg->display_dim_after_s *
+                                                1000000
+                              ? cfg->display_dim_pct
+                              : cfg->display_full_pct);
 
     vTaskDelay(pdMS_TO_TICKS(REFRESH_MS));
   }

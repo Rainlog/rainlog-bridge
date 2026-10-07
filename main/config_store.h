@@ -3,8 +3,8 @@
 // Single source of truth for all provisionable settings. Loaded at boot from
 // NVS, falling back to the compile-time defaults in config.h for any unset
 // field. The web configurator writes here; wifi_link / forwarder / ui read
-// here. Hosts/paths (Rainlog host, WU host, update path) stay compile-time in
-// config.h and are not provisioned.
+// here. Host/path and display defaults also support NVS overrides through
+// the optional serial debug console.
 //
 // The station console is configured with its Rainlog credentials (station id
 // "Rainlog<gaugeId>" + the gauge's PWS key) directly, so the bridge passes its
@@ -14,6 +14,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "esp_err.h"
@@ -32,12 +33,21 @@ typedef struct {
   char sta_pass[65];
   char ap_ssid[33];  // SoftAP the station joins
   // The bridge WiFi password is also the setup password: it gates joining
-  // the AP (WPA2) and, via HTTP Basic auth, opening the config page from the
-  // home LAN.
+  // the AP (WPA2) and, via a sign-in session or HTTP Basic auth, opening the
+  // config page from the home LAN.
   char ap_pass[65];
   wu_mapping_t wu_map[WU_MAP_MAX];  // gauge id -> WU relay credentials
   uint8_t wu_map_count;             // active entries in wu_map
-  bool provisioned;                 // true once saved via the configurator
+  char rainlog_host[128];
+  char wu_host[128];
+  char wu_update_path[128];
+  char ota_host[128];
+  char ota_manifest_path[192];
+  uint32_t display_full_pct;
+  uint32_t display_dim_pct;
+  uint32_t display_dim_after_s;  // 0 disables idle dimming
+  uint32_t led_level;  // 0 disables status LED; LILYGO LED is on/off only
+  bool provisioned;    // true once saved via the configurator
 } bridge_config_t;
 
 // Load config from NVS into the in-RAM cache (defaults from config.h for any
@@ -66,3 +76,17 @@ bool config_is_provisioned(void);
 // Erase all saved settings (factory reset). The next boot loads compile-time
 // defaults and is unprovisioned. Caller typically reboots right after.
 esp_err_t config_clear(void);
+
+// Scalar settings metadata shared by persistence and the debug console.
+typedef struct {
+  const char *name;
+  size_t offset, size;  // strings include NUL; numeric fields are uint32_t
+  uint32_t maximum;     // zero identifies a string field
+} config_field_t;
+extern const config_field_t config_fields[];
+extern const size_t config_field_count;
+// NULL on success; otherwise a static validation error. Called by config_save.
+const char *config_validate(const bridge_config_t *cfg);
+
+// Persist a settings snapshot, preserving its provisioning state.
+esp_err_t config_update(const bridge_config_t *cfg);

@@ -1,6 +1,7 @@
 #include "status_led.h"
 
 #include "board.h"
+#include "config_store.h"
 #include "driver/gpio.h"
 #if !BOARD_DISPLAY_SSD1306
 #include "driver/rmt_encoder.h"
@@ -14,9 +15,6 @@
 #if !BOARD_DISPLAY_SSD1306
 static const char *TAG = "status_led";
 #endif
-
-// Dim level: the onboard WS2812 is bright; keep status colors easy on the eyes.
-#define LED_LEVEL 24
 
 // RMT resolution: 10MHz -> 0.1us per tick. WS2812 bit timings (T0H 0.3us /
 // T0L 0.9us, T1H 0.9us / T1L 0.3us) expressed in ticks.
@@ -68,11 +66,11 @@ static void led_task(void *arg) {
   while (true) {
     uint8_t r = 0, g = 0, b = 0;
     if (s_error) {
-      r = LED_LEVEL;  // red wins over everything
+      r = config_get()->led_level;  // red wins over everything
     } else if (esp_timer_get_time() < success_until_us()) {
-      g = LED_LEVEL;  // green success pulse
+      g = config_get()->led_level;  // green success pulse
     } else if (s_provisioning) {
-      b = LED_LEVEL;  // blue
+      b = config_get()->led_level;  // blue
     }
     // Only push to the LED when the color actually changes, so the CPU can idle
     // (and DFS can drop frequency) instead of re-transmitting every tick.

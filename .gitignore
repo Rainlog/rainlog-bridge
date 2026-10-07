@@ -37,3 +37,9 @@ dist/
 # listed so neither can reappear in a commit.
 AGENTS.md
 PLAN.md
+
+# Optional debug-console build configurations and artifacts.
+build-debug/
+build-lilygo-debug/
+sdkconfig.debug*
+sdkconfig.lilygo.debug*

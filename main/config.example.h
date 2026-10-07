@@ -1,8 +1,7 @@
 // Rainlog Wireless Bridge - configuration template.
 //
 // Copy this file to "config.h" (same directory) and fill in your values.
-// config.h is gitignored so your WiFi password and Rainlog key never get
-// committed. These are only fallback defaults: the SoftAP web configurator
+// config.h is gitignored so your WiFi password never gets committed. These are only fallback defaults: the SoftAP web configurator
 // (see README.md) provisions the real settings at runtime into NVS.
 
 #pragma once
@@ -26,7 +25,7 @@
 #define CFG_WIFI_AP_PASSWORD "rainlog123"
 
 // ---------------------------------------------------------------------------
-// Hosts / paths (defaults; rarely changed).
+// Hosts / paths (defaults; optional debug console stores NVS overrides).
 //
 // NOTE FOR FORKS: these point at rainlog.org, the service this firmware was
 // built for. A build with these defaults uploads readings to rainlog.org and
@@ -55,5 +54,5 @@
 // One manifest per board variant, named for its BOARD_ID (board.h) so a 4MB
 // and an 8MB build never see each other's images. make-ota.sh writes the
 // matching manifest-<BOARD_ID>.json. BOARD_ID is a string literal, so this
-// concatenates at the use site (ota_update.c includes board.h).
+// concatenates when config_store.c loads the fallback defaults.
 #define CFG_OTA_MANIFEST_PATH "/rainlog-bridge-ota/manifest-" BOARD_ID ".json"

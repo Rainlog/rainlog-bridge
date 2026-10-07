@@ -1,11 +1,14 @@
 #include "config_store.h"
 
+#include <errno.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 
 #include "activity.h"
+#include "board.h"
 #include "config.h"
 #include "esp_log.h"
 #include "esp_mac.h"
@@ -16,10 +19,70 @@ static const char *TAG = "config";
 
 static bridge_config_t s_cfg;
 
-// Overwrite `out` from NVS key only if present; otherwise leave the default.
-static void load_str(nvs_handle_t h, const char *key, char *out, size_t outsz) {
-  size_t len = outsz;
-  nvs_get_str(h, key, out, &len);  // leaves out unchanged on error
+#define STRING_FIELD(name)                 \
+  {#name, offsetof(bridge_config_t, name), \
+   sizeof(((bridge_config_t *)0)->name), 0}
+#define NUMBER_FIELD(name, max) \
+  {#name, offsetof(bridge_config_t, name), sizeof(uint32_t), max}
+const config_field_t config_fields[] = {
+    STRING_FIELD(sta_ssid),
+    STRING_FIELD(sta_pass),
+    STRING_FIELD(ap_ssid),
+    STRING_FIELD(ap_pass),
+    STRING_FIELD(rainlog_host),
+    STRING_FIELD(wu_host),
+    STRING_FIELD(wu_update_path),
+    STRING_FIELD(ota_host),
+    STRING_FIELD(ota_manifest_path),
+    NUMBER_FIELD(display_full_pct, 100),
+    NUMBER_FIELD(display_dim_pct, 100),
+    NUMBER_FIELD(display_dim_after_s, UINT32_MAX),
+    NUMBER_FIELD(led_level, 255)};
+const size_t config_field_count =
+    sizeof(config_fields) / sizeof(config_fields[0]);
+// NVS keys are limited to 15 bytes, independent of descriptive API names.
+static const char *field_keys[] = {
+    "sta_ssid", "sta_pass",  "ap_ssid",  "ap_pass",  "rl_host",
+    "wu_host",  "wu_path",   "ota_host", "ota_path", "disp_full",
+    "disp_dim", "disp_idle", "led_level"};
+_Static_assert(sizeof(field_keys) / sizeof(field_keys[0]) ==
+                   sizeof(config_fields) / sizeof(config_fields[0]),
+               "setting keys");
+const char *config_validate(const bridge_config_t *cfg) {
+  for (size_t i = 0; i < config_field_count; i++) {
+    const config_field_t *f = &config_fields[i];
+    const char *value = (const char *)cfg + f->offset;
+    if (f->maximum) {
+      if (*(const uint32_t *)value > f->maximum)
+        return "numeric setting out of range";
+    } else if (!memchr(value, 0, f->size))
+      return "setting too long";
+  }
+  if (!cfg->ap_ssid[0]) return "Bridge Wi-Fi SSID required";
+  if (strlen(cfg->ap_pass) < 8)
+    return "Bridge Wi-Fi password must be at least 8 characters";
+  const char *hosts[] = {cfg->rainlog_host, cfg->wu_host, cfg->ota_host};
+  for (size_t i = 0; i < sizeof(hosts) / sizeof(hosts[0]); i++) {
+    if (!hosts[i][0]) return "host required";
+    for (const unsigned char *p = (const unsigned char *)hosts[i]; *p; p++)
+      if (*p <= 32 || *p >= 127 || strchr("/:?#@", *p))
+        return "host must be a hostname without scheme, path or port";
+  }
+  if (cfg->wu_update_path[0] != '/' || cfg->ota_manifest_path[0] != '/')
+    return "paths must begin with /";
+  if (strpbrk(cfg->wu_update_path, "\r\n ?#") ||
+      strpbrk(cfg->ota_manifest_path, "\r\n ?#"))
+    return "invalid path";
+  if (cfg->wu_map_count > WU_MAP_MAX) return "too many WU mappings";
+  for (unsigned i = 0; i < cfg->wu_map_count; i++) {
+    const wu_mapping_t *m = &cfg->wu_map[i];
+    if (!m->gauge_id || !memchr(m->wu_id, 0, sizeof(m->wu_id)) ||
+        !m->wu_id[0] || !memchr(m->wu_key, 0, sizeof(m->wu_key)))
+      return "invalid WU mapping";
+    for (unsigned j = 0; j < i; j++)
+      if (cfg->wu_map[j].gauge_id == m->gauge_id) return "duplicate gauge id";
+  }
+  return NULL;
 }
 
 void config_load(void) {
@@ -33,6 +96,18 @@ void config_load(void) {
   snprintf(s_cfg.ap_ssid, sizeof(s_cfg.ap_ssid), "%s-%02X%02X",
            CFG_WIFI_AP_SSID, mac[4], mac[5]);
   snprintf(s_cfg.ap_pass, sizeof(s_cfg.ap_pass), "%s", CFG_WIFI_AP_PASSWORD);
+  snprintf(s_cfg.rainlog_host, sizeof(s_cfg.rainlog_host), "%s",
+           CFG_RAINLOG_HOST);
+  snprintf(s_cfg.wu_host, sizeof(s_cfg.wu_host), "%s", CFG_WU_HOST);
+  snprintf(s_cfg.wu_update_path, sizeof(s_cfg.wu_update_path), "%s",
+           CFG_WU_UPDATE_PATH);
+  snprintf(s_cfg.ota_host, sizeof(s_cfg.ota_host), "%s", CFG_OTA_HOST);
+  snprintf(s_cfg.ota_manifest_path, sizeof(s_cfg.ota_manifest_path), "%s",
+           CFG_OTA_MANIFEST_PATH);
+  s_cfg.display_full_pct = 100;
+  s_cfg.display_dim_pct = 6;
+  s_cfg.display_dim_after_s = 30;
+  s_cfg.led_level = 24;
   memset(s_cfg.wu_map, 0, sizeof(s_cfg.wu_map));
   s_cfg.wu_map_count = 0;
   s_cfg.provisioned = false;
@@ -42,10 +117,19 @@ void config_load(void) {
     ESP_LOGI(TAG, "no saved config; using compile-time defaults");
     return;
   }
-  load_str(h, "sta_ssid", s_cfg.sta_ssid, sizeof(s_cfg.sta_ssid));
-  load_str(h, "sta_pass", s_cfg.sta_pass, sizeof(s_cfg.sta_pass));
-  load_str(h, "ap_ssid", s_cfg.ap_ssid, sizeof(s_cfg.ap_ssid));
-  load_str(h, "ap_pass", s_cfg.ap_pass, sizeof(s_cfg.ap_pass));
+  for (size_t i = 0; i < config_field_count; i++) {
+    const config_field_t *f = &config_fields[i];
+    void *value = (char *)&s_cfg + f->offset;
+    if (f->maximum) {
+      uint32_t number;
+      if (nvs_get_u32(h, field_keys[i], &number) == ESP_OK &&
+          number <= f->maximum)
+        *(uint32_t *)value = number;
+    } else {
+      size_t length = f->size;
+      nvs_get_str(h, field_keys[i], value, &length);
+    }
+  }
   // WU map: a single blob of wu_mapping_t entries.
   size_t blob_len = sizeof(s_cfg.wu_map);
   if (nvs_get_blob(h, "wu_map", s_cfg.wu_map, &blob_len) == ESP_OK) {
@@ -76,7 +160,9 @@ uint32_t config_parse_gauge_id(const char *s, bool require_prefix) {
     return 0;  // strtoul would accept leading spaces and signs
   }
   char *end;
+  errno = 0;
   unsigned long v = strtoul(s, &end, 10);
+  if (errno || v > UINT32_MAX) return 0;
   return *end == '\0' ? (uint32_t)v : 0;
 }
 
@@ -92,26 +178,28 @@ const wu_mapping_t *config_find_wu_mapping(uint32_t gauge_id) {
   return NULL;
 }
 
-esp_err_t config_save(const bridge_config_t *cfg) {
+esp_err_t config_update(const bridge_config_t *cfg) {
+  if (config_validate(cfg)) return ESP_ERR_INVALID_ARG;
   nvs_handle_t h;
   esp_err_t err = nvs_open(NS, NVS_READWRITE, &h);
   if (err != ESP_OK) {
     return err;
   }
   // First failing write wins; a partial save must not report success.
-  if (err == ESP_OK) err = nvs_set_str(h, "sta_ssid", cfg->sta_ssid);
-  if (err == ESP_OK) err = nvs_set_str(h, "sta_pass", cfg->sta_pass);
-  if (err == ESP_OK) err = nvs_set_str(h, "ap_ssid", cfg->ap_ssid);
-  if (err == ESP_OK) err = nvs_set_str(h, "ap_pass", cfg->ap_pass);
+  for (size_t i = 0; i < config_field_count && err == ESP_OK; i++) {
+    const config_field_t *f = &config_fields[i];
+    const void *value = (const char *)cfg + f->offset;
+    err = f->maximum ? nvs_set_u32(h, field_keys[i], *(const uint32_t *)value)
+                     : nvs_set_str(h, field_keys[i], value);
+  }
   if (err == ESP_OK)
     err = nvs_set_blob(h, "wu_map", cfg->wu_map, sizeof(cfg->wu_map));
   if (err == ESP_OK) err = nvs_set_u8(h, "wu_n", cfg->wu_map_count);
-  if (err == ESP_OK) err = nvs_set_u8(h, "provd", 1);
+  if (err == ESP_OK) err = nvs_set_u8(h, "provd", cfg->provisioned);
   if (err == ESP_OK) err = nvs_commit(h);
   nvs_close(h);
   if (err == ESP_OK) {
     s_cfg = *cfg;
-    s_cfg.provisioned = true;
     activity_poke();  // a setting change brightens the screen
     ESP_LOGI(TAG, "config saved");
   }
@@ -133,4 +221,10 @@ esp_err_t config_clear(void) {
   nvs_close(h);
   ESP_LOGW(TAG, "config cleared (factory reset)");
   return err;
+}
+
+esp_err_t config_save(const bridge_config_t *cfg) {
+  bridge_config_t provisioned = *cfg;
+  provisioned.provisioned = true;
+  return config_update(&provisioned);
 }

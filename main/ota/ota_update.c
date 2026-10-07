@@ -6,7 +6,7 @@
 #include <strings.h>
 
 #include "board.h"
-#include "config.h"
+#include "config_store.h"
 #include "esp_app_desc.h"
 #include "esp_crt_bundle.h"
 #include "esp_http_client.h"
@@ -148,8 +148,9 @@ static bool fetch_manifest(char *latest, size_t latest_len, char *url,
     return false;
   }
   int status = 0;
-  bool got = http_util_https_get(CFG_OTA_HOST, CFG_OTA_MANIFEST_PATH, NULL,
-                                 body, MANIFEST_BUF, &status);
+  bool got = http_util_https_get(config_get()->ota_host,
+                                 config_get()->ota_manifest_path, NULL, body,
+                                 MANIFEST_BUF, &status);
 
   // The manifest's "board" must match ours so a device never applies another
   // board's image (each board has its own manifest; see make-ota.sh). Absent
