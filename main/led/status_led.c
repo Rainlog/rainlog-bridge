@@ -1,8 +1,11 @@
 #include "status_led.h"
 
 #include "board.h"
+#include "driver/gpio.h"
+#if !BOARD_DISPLAY_SSD1306
 #include "driver/rmt_encoder.h"
 #include "driver/rmt_tx.h"
+#endif
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -20,8 +23,10 @@ static const char *TAG = "status_led";
 #define SUCCESS_FLASH_US (250 * 1000)
 #define RENDER_PERIOD_MS 50
 
+#if !BOARD_DISPLAY_SSD1306
 static rmt_channel_handle_t s_chan;
 static rmt_encoder_handle_t s_encoder;
+#endif
 
 static volatile bool s_error;
 static volatile bool s_provisioning;
@@ -38,6 +43,9 @@ static int64_t success_until_us(void) {
 }
 
 static void render(uint8_t r, uint8_t g, uint8_t b) {
+#if BOARD_DISPLAY_SSD1306
+  gpio_set_level(BOARD_STATUS_LED_GPIO, r != 0 || g != 0 || b != 0);
+#else
   if (s_chan == NULL || s_encoder == NULL) {
     return;
   }
@@ -49,6 +57,7 @@ static void render(uint8_t r, uint8_t g, uint8_t b) {
   rmt_transmit_config_t tx = {.loop_count = 0};
   rmt_transmit(s_chan, s_encoder, buf, sizeof(buf), &tx);
   rmt_tx_wait_all_done(s_chan, portMAX_DELAY);
+#endif
 }
 
 static void led_task(void *arg) {
@@ -75,6 +84,13 @@ static void led_task(void *arg) {
 }
 
 void status_led_init(void) {
+#if BOARD_DISPLAY_SSD1306
+  gpio_config_t config = {
+      .pin_bit_mask = 1ULL << BOARD_STATUS_LED_GPIO,
+      .mode = GPIO_MODE_OUTPUT,
+  };
+  ESP_ERROR_CHECK(gpio_config(&config));
+#else
   rmt_tx_channel_config_t chan_cfg = {
       .clk_src = RMT_CLK_SRC_DEFAULT,
       .gpio_num = BOARD_RGB_LED_GPIO,
@@ -102,6 +118,7 @@ void status_led_init(void) {
   }
 
   ESP_ERROR_CHECK(rmt_enable(s_chan));
+#endif
   render(0, 0, 0);
   xTaskCreate(led_task, "status_led", 2048, NULL, 1, NULL);
 }

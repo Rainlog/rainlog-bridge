@@ -9,6 +9,19 @@ on:
 jobs:
   firmware:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - target: esp32c6
+            build_dir: build
+            sdkconfig: sdkconfig
+            defaults: sdkconfig.defaults
+          - target: esp32
+            build_dir: build-lilygo
+            sdkconfig: sdkconfig.lilygo
+            defaults: sdkconfig.lilygo.defaults
+    env:
+      IDF_TARGET: ${{ matrix.target }}
     # Same image the local ./build.sh pins, so CI and a developer machine
     # compile the identical toolchain. managed_components/ is committed and
     # dependencies.lock pins the rest, so this needs no network at build time.
@@ -24,7 +37,17 @@ jobs:
 
       - name: Build
         shell: bash
-        run: . $IDF_PATH/export.sh && idf.py build
+        run: |
+          . $IDF_PATH/export.sh
+          idf.py -B "${{ matrix.build_dir }}" \
+            -D SDKCONFIG="$PWD/${{ matrix.sdkconfig }}" \
+            -D SDKCONFIG_DEFAULTS="$PWD/${{ matrix.defaults }}" build
+
+  display-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./tests/test-display.sh
 
   # The firmware embeds main/web/index.html as a committed generated file, so a
   # stale commit would ship a page that does not match web/src/. Rebuild it and

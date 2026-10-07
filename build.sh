@@ -1,44 +1,44 @@
 #!/usr/bin/env bash
-# Build (and optionally flash) the Rainlog Wireless Bridge entirely inside the
-# pinned ESP-IDF Docker image. No host toolchain required.
-#
-#   ./build.sh              build the firmware
-#   ./build.sh flash        build + flash + serial monitor the plugged-in board
-#   ./build.sh <idf args>   run an arbitrary idf.py command in the container
-#
-# Target board: Waveshare ESP32-C6-LCD-1.47, native USB-CDC. Override the port
-# with PORT=/dev/ttyXXX (default /dev/ttyACM0).
+# Build with the pinned ESP-IDF Docker image. C6 is the default board.
+#   ./build.sh
+#   BOARD=lilygo ./build.sh
+#   PORT=/dev/serial/by-id/<device> ./build.sh flash
+#   BOARD=lilygo PORT=/dev/serial/by-id/<device> ./build.sh flash
+# Other arguments are passed to idf.py. Flash requires an explicit port.
 set -euo pipefail
 
 IMAGE=rainlog-wireless-bridge-idf
-PORT="${PORT:-/dev/ttyACM0}"
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
-
-docker build -t "$IMAGE" "$PROJECT_DIR"
-
-cmd="${1:-build}"
-case "$cmd" in
-  build)
-    # No TTY: plain build, works in CI / non-interactive shells.
-    exec docker run --rm \
-      -v "$PROJECT_DIR":/project \
-      "$IMAGE" \
-      idf.py build
-    ;;
-  flash)
-    # Needs the USB device and an interactive TTY for the serial monitor.
-    exec docker run --rm -it \
-      -v "$PROJECT_DIR":/project \
-      --device "$PORT":"$PORT" \
-      "$IMAGE" \
-      idf.py -p "$PORT" flash monitor
-    ;;
-  *)
-    # Pass through any other idf.py invocation.
-    exec docker run --rm -it \
-      -v "$PROJECT_DIR":/project \
-      --device "$PORT":"$PORT" \
-      "$IMAGE" \
-      idf.py "$@"
-    ;;
+case "${BOARD:-c6}" in
+  c6) target=esp32c6; build_dir=build; config=sdkconfig; defaults=sdkconfig.defaults ;;
+  lilygo) target=esp32; build_dir=build-lilygo; config=sdkconfig.lilygo; defaults=sdkconfig.lilygo.defaults ;;
+  *) echo "Unknown BOARD: use c6 or lilygo" >&2; exit 1 ;;
 esac
+
+# No COPY instructions: don't send local demos, secrets or build caches.
+docker build -t "$IMAGE" - < "$PROJECT_DIR/Dockerfile"
+
+args=("$@")
+[[ ${#args[@]} -gt 0 ]] || args=(build)
+options=(--rm -v "$PROJECT_DIR":/project -e "IDF_TARGET=$target")
+idf_args=(-B "$build_dir" -D "SDKCONFIG=/project/$config"
+          -D "SDKCONFIG_DEFAULTS=/project/$defaults")
+if [[ -n "${PORT:-}" ]]; then
+  device=$(readlink -f "$PORT")
+  options+=(--device "$device:$device")
+  idf_args+=(-p "$device")
+fi
+for arg in "${args[@]}"; do
+  case "$arg" in
+    flash|app-flash|bootloader-flash|partition-table-flash|erase-flash|monitor)
+      [[ -n "${PORT:-}" ]] || { echo "PORT is required for $arg" >&2; exit 1; }
+      ;;
+  esac
+done
+if [[ "${args[0]}" == flash && -t 0 && -t 1 ]]; then
+  options+=(-it)
+  args+=(monitor)
+elif [[ " ${args[*]} " == *" monitor "* ]]; then
+  options+=(-it)
+fi
+exec docker run "${options[@]}" "$IMAGE" idf.py "${idf_args[@]}" "${args[@]}"

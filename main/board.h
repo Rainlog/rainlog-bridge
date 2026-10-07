@@ -1,11 +1,27 @@
-// Rainlog Wireless Bridge - board pin map (Waveshare ESP32-C6-LCD-1.47).
+// Rainlog Bridge board identities, display geometry and GPIO assignments.
 //
 // Single source of truth for GPIO assignments (DRY). Values from the official
-// Waveshare demo drivers (see README.md / ./fetch-demos.sh). LCD/SD pins are
-// listed for when the LCD UI lands.
+// Waveshare and LILYGO demos (see README.md / ./fetch-demos.sh).
 
 #pragma once
 
+#include "sdkconfig.h"
+
+#if CONFIG_IDF_TARGET_ESP32
+// LILYGO T3 LoRa32 V1.6.1, 433 MHz SX1278 variant.
+#define BOARD_ID "lilygo-t3-v1.6.1-sx1278"
+#define BOARD_DISPLAY_SSD1306 1
+#define BOARD_DISPLAY_W 128
+#define BOARD_DISPLAY_H 64
+#define BOARD_I2C_SDA_GPIO 21
+#define BOARD_I2C_SCL_GPIO 22
+#define BOARD_OLED_ADDRESS 0x3C
+#define BOARD_STATUS_LED_GPIO 25
+#define BOARD_BOOT_BUTTON_GPIO 0
+#elif CONFIG_IDF_TARGET_ESP32C6
+#define BOARD_DISPLAY_SSD1306 0
+#define BOARD_DISPLAY_W 172
+#define BOARD_DISPLAY_H 320
 // Board identity, published in the OTA manifest ("board"), checked by the
 // firmware so a device never applies another board's image, and used to derive
 // the manifest filename (see CFG_OTA_MANIFEST_PATH). It encodes the chip's
@@ -36,3 +52,7 @@
 // this non-touch board; used as the interaction signal (wake the backlight) and
 // later for hold-to-provision.
 #define BOARD_BOOT_BUTTON_GPIO 9
+
+#else
+#error "Unsupported Rainlog Bridge target: select esp32c6 or esp32"
+#endif

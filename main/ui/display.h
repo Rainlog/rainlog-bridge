@@ -1,6 +1,6 @@
 // Rainlog Wireless Bridge - LCD display primitives.
 //
-// Drives the onboard ST7789 (172x320) via esp_lcd and renders text from an
+// Drives the selected ST7789 LCD or SSD1306 OLED via esp_lcd, rendering an
 // 8x13 bitmap font (X11 misc-fixed, see font8x13.h) into an in-RAM
 // framebuffer. Caller composes a frame with display_clear/display_text, then
 // display_flush pushes it to the panel.
@@ -9,16 +9,17 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#define DISPLAY_W 172
-#define DISPLAY_H 320
+#include "board.h"
+
+#define DISPLAY_W BOARD_DISPLAY_W
+#define DISPLAY_H BOARD_DISPLAY_H
 
 // 8x13 glyph cell: text at scale s advances GLYPH*s px per char and is
 // GLYPH_H*s px tall.
 #define GLYPH 8
 #define GLYPH_H 13
 
-// RGB565 helpers. The panel is wired BGR and wants byte-swapped 16-bit pixels;
-// display_rgb() packs both so callers pass intuitive (r,g,b). See display.c.
+// Standard RGB565 colors; the OLED maps non-black pixels to lit pixels.
 uint16_t display_rgb(uint8_t r, uint8_t g, uint8_t b);
 
 // Common colors (lazily-evaluated via display_rgb in callers is fine, but these
@@ -49,7 +50,7 @@ void display_text_bold(int x, int y, int scale, uint16_t color,
 // Fill a w*h rectangle at (x, y) with one color. Clipped to the framebuffer.
 void display_fill_rect(int x, int y, int w, int h, uint16_t color);
 
-// Set LCD backlight brightness, 0..100 percent (PWM via LEDC).
+// Set brightness, 0..100 percent (LCD PWM or OLED contrast; 0 turns it off).
 void display_set_backlight(uint8_t percent);
 
 // Blit an RGBA image (w*h*4 bytes, row-major) at (x, y). Pixels with alpha

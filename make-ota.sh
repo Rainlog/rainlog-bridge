@@ -3,6 +3,7 @@
 # rainlog.org/rainlog-bridge-ota/ (served by the existing nginx).
 #
 #   ./make-ota.sh [OUTDIR]
+#   BOARD=lilygo ./make-ota.sh [OUTDIR]
 #
 # Builds the firmware (via build.sh, in Docker), then writes into OUTDIR:
 #   - rainlog-bridge-<board>-<version>.bin  the app image
@@ -34,24 +35,28 @@ if [[ -z "$VERSION" ]]; then
   exit 1
 fi
 
-# Board identity comes from main/board.h (also compiled into the firmware,
-# which refuses a manifest whose "board" doesn't match, and derives its
-# CFG_OTA_MANIFEST_PATH from it). One manifest + image stream per board variant,
-# named for the BOARD_ID (the id encodes the flash size, since that fixes the
-# partition layout): the 8MB build is esp32-c6fh8-lcd-1.47, a 4MB build would be
-# esp32-c6fh4-lcd-1.47, etc.
-BOARD="$(sed -n 's/^#define BOARD_ID "\([^"]*\)".*/\1/p' main/board.h)"
-if [[ -z "$BOARD" ]]; then
-  echo "make-ota: could not read BOARD_ID from main/board.h" >&2
-  exit 1
-fi
-BIN_NAME="rainlog-bridge-$BOARD-$VERSION.bin"
-MANIFEST_NAME="manifest-$BOARD.json"
+case "${BOARD:-c6}" in
+  c6) BUILD_DIR=build ;;
+  lilygo) BUILD_DIR=build-lilygo ;;
+  *) echo "Unknown BOARD: use c6 or lilygo" >&2; exit 1 ;;
+esac
 
-echo "make-ota: building firmware v$VERSION for $BOARD"
+echo "make-ota: building firmware v$VERSION for ${BOARD:-c6}"
 ./build.sh
 
-BIN_SRC="$PROJECT_DIR/build/rainlog-wireless-bridge.bin"
+# Preprocess the real board header against this build's generated sdkconfig.
+# Reading every textual BOARD_ID definition would mix the two board branches.
+BOARD_ID="$(printf '#include "board.h"\nBOARD_ID\n' | \
+  docker run --rm -i --entrypoint cc -v "$PROJECT_DIR":/project \
+    rainlog-wireless-bridge-idf -E -P -I /project/main \
+    -I "/project/$BUILD_DIR/config" -x c - | tr -d '"[:space:]')"
+if [[ ! "$BOARD_ID" =~ ^[a-zA-Z0-9._-]+$ ]]; then
+  echo "make-ota: could not read compiled BOARD_ID" >&2
+  exit 1
+fi
+BIN_NAME="rainlog-bridge-$BOARD_ID-$VERSION.bin"
+MANIFEST_NAME="manifest-$BOARD_ID.json"
+BIN_SRC="$PROJECT_DIR/$BUILD_DIR/rainlog-wireless-bridge.bin"
 if [[ ! -f "$BIN_SRC" ]]; then
   echo "make-ota: build output not found: $BIN_SRC" >&2
   exit 1
@@ -67,7 +72,7 @@ DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 cat > "$OUTDIR/$MANIFEST_NAME" <<EOF
 {
   "version": "$VERSION",
-  "board": "$BOARD",
+  "board": "$BOARD_ID",
   "url": "$BASE_URL/$BIN_NAME",
   "sha256": "$SHA256",
   "size": $SIZE,

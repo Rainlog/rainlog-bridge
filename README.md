@@ -174,16 +174,23 @@ ST7789 LCD.
 These units are **ESP32-C6FH8 with 8MB flash**, despite the Waveshare spec and
 demo claiming 4MB. Check yours with `esptool flash-id`.
 
+**LILYGO T3 LoRa32 V1.6.1 (433 MHz SX1278).** Our board identifies as an
+ESP32-PICO-D4 with 4MB flash. Its 128x64 SSD1306 OLED uses I2C address `0x3C`,
+SDA GPIO21 and SCL GPIO22. It has a single-color status LED on GPIO25 and a
+BOOT button on GPIO0. The radio is present but reception is not implemented.
+
 Flash size fixes the partition layout and the layouts are not interchangeable,
 so there is one image stream per variant, keyed on `BOARD_ID` (`main/board.h`).
 
 | Variant | `BOARD_ID` | Partitions | Status |
 |---|---|---|---|
 | C6FH8 (8MB) | `esp32-c6fh8-lcd-1.47` | `partitions.csv` | Built and shipping |
+| LILYGO T3 V1.6.1 (4MB) | `lilygo-t3-v1.6.1-sx1278` | `partitions-lilygo.csv` | OLED and compact UI supported |
 | C6FH4 (4MB) | `esp32-c6fh4-lcd-1.47` | `partitions-c6fh4.csv` | Staged, untested (no hardware on hand) |
 
-The 4MB layout has no `storage` partition, so the retry buffer and statistics
-would not persist across reboots on that variant.
+The C6FH4 layout has no `storage` partition, so the retry buffer and statistics
+would not persist across reboots on that variant. The LILYGO layout reserves
+128KB for LittleFS alongside two 1.875MB OTA app slots.
 
 ### GPIO map
 
@@ -207,18 +214,24 @@ Native ESP-IDF, not Arduino. Every build runs inside Docker against a pinned
 
 ```sh
 cp main/config.example.h main/config.h   # once, before the first build
-./build.sh                               # build
-./build.sh flash                         # build, flash, serial monitor
+./build.sh                               # build the C6
+BOARD=lilygo ./build.sh                  # build the LILYGO
+PORT=/dev/ttyACM3 ./build.sh flash        # C6: build and flash
+BOARD=lilygo PORT=/dev/ttyACM2 ./build.sh flash  # LILYGO: build and flash
 ```
 
 `config.h` is gitignored and holds only compile-time fallbacks; everything
 user-facing is provisioned at runtime. Never commit WiFi passwords or PWS keys.
 
-Flashing defaults to `/dev/ttyACM0`; override with `PORT=/dev/ttyXXX`.
+Flashing requires an explicit `PORT`; prefer `/dev/serial/by-id/...` over a
+numbered device node. Interactive `flash` also starts the serial monitor.
+C6 builds use `build/` and `sdkconfig`; LILYGO builds use `build-lilygo/` and
+`sdkconfig.lilygo`, so changing boards does not overwrite the other build.
 `./build.sh flash` writes the bootloader, partition table, OTA data, and app.
 
-`managed_components/` is committed rather than fetched, and `dependencies.lock`
-pins exact versions, so the build never needs network access.
+`managed_components/` is committed rather than fetched. `dependencies.lock`
+(C6) and `dependencies.esp32.lock` (LILYGO) pin exact versions. Once the Docker
+image is available, firmware compilation can run offline.
 
 ### Configuration web UI
 
@@ -231,6 +244,21 @@ cd web && npm install && npm run build
 
 **The generated `main/web/index.html` must be committed**: the IDF image has no
 Node, so the firmware build never runs npm. CI fails if it is stale.
+
+### Display backends
+
+Both panels use ESP-IDF's built-in `esp_lcd` drivers. `main/ui/display_st7789.c`
+retains the Waveshare panel's RAM byte order, voltage/gamma settings, 34-column
+offset, mirroring and inversion. `main/ui/display_ssd1306.c` packs the shared
+RGB565 drawing buffer into SSD1306 page bytes; non-black pixels light the OLED.
+The LILYGO uses a four-row setup/status/reset layout, with long setup credentials
+cycling through 16-character chunks. Brightness controls LCD backlight PWM or
+OLED contrast. Flush finishes before the single drawing buffer is reused.
+
+Run `./tests/test-display.sh` for host checks of RGB565 colors, drawing bounds,
+alpha handling, brightness and OLED page packing on both screen geometries.
+Controller datasheets and their source links are in `datasheets/`. Both display
+backends were flashed and checked on hardware on 2026-10-07.
 
 ### Reference drivers
 

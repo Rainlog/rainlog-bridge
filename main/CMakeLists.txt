@@ -1,3 +1,9 @@
+if(IDF_TARGET STREQUAL "esp32")
+    set(DISPLAY_PANEL_SOURCE "ui/display_ssd1306.c")
+else()
+    set(DISPLAY_PANEL_SOURCE "ui/display_st7789.c")
+endif()
+
 idf_component_register(
     SRCS
         "bridge_main.c"
@@ -23,7 +29,7 @@ idf_component_register(
         "ui/screen_status.c"
         "ui/screen_reset.c"
         "ui/display.c"
-        "ui/st7789t_panel.c"
+        ${DISPLAY_PANEL_SOURCE}
     INCLUDE_DIRS
         "."
         "net"
@@ -47,6 +53,7 @@ idf_component_register(
         esp_timer
         esp_driver_rmt
         esp_lcd
+        esp_driver_i2c
         esp_driver_spi
         esp_driver_gpio
         esp_driver_ledc

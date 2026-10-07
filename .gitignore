@@ -1,5 +1,8 @@
 # ESP-IDF build output
 build/
+build-lilygo/
+sdkconfig.lilygo
+sdkconfig.lilygo.old
 
 # Generated config (sdkconfig.defaults is the committed source of truth)
 sdkconfig

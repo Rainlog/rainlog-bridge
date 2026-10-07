@@ -5,4 +5,9 @@ cmake_minimum_required(VERSION 3.16)
 set(PROJECT_VER "1.0.0")
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
+# ESP-IDF dependency locks include the target. Keep ESP32 builds from
+# rewriting the default C6 lock, while sharing the vendored components.
+if(IDF_TARGET STREQUAL "esp32" OR "$ENV{IDF_TARGET}" STREQUAL "esp32")
+    idf_build_set_property(DEPENDENCIES_LOCK "${CMAKE_CURRENT_LIST_DIR}/dependencies.esp32.lock")
+endif()
 project(rainlog-wireless-bridge)

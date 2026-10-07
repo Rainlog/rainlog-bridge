@@ -1,6 +1,7 @@
-// Rainlog Wireless Bridge - RGB status LED.
+// Rainlog Bridge status LED (Waveshare RGB or LILYGO single-color).
 //
-// Drives the onboard WS2812. Priority of states, highest first:
+// Drives the onboard LED. The LILYGO lights for any non-idle state.
+// Priority of states, highest first:
 //   ERROR        -> solid RED, stays lit until the error clears
 //   PROVISIONING -> solid BLUE (unconfigured / BLE provisioning)
 //   success flash-> brief GREEN pulse on a successful forward
