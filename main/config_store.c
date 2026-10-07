@@ -8,6 +8,7 @@
 #include <strings.h>
 
 #include "activity.h"
+#include "net/ap_client_gauges.h"
 #include "board.h"
 #include "config.h"
 #include "esp_log.h"
@@ -101,6 +102,8 @@ const char *config_validate(const bridge_config_t *cfg) {
     if (!supported || !m->gauge_id || !m->rainlog_key[0] ||
         !memchr(m->rainlog_key, 0, sizeof(m->rainlog_key)))
       return "invalid radio mapping";
+    if (ap_clients_has_gauge(m->gauge_id))
+      return "Rainlog gauge is already assigned to a Wi-Fi device";
     for (unsigned j = 0; j < i; j++) {
       const radio_mapping_t *other = &cfg->radio_map[j];
       if ((other->model == m->model && other->sensor_id == m->sensor_id &&
@@ -312,4 +315,14 @@ bool config_wifi_interception_enabled(void) {
 #else
   return true;
 #endif
+}
+
+bool config_gauge_uses_radio(uint32_t gauge_id) {
+#if RAINLOG_RADIO
+  for (unsigned i = 0; i < s_cfg.radio_map_count; i++)
+    if (s_cfg.radio_map[i].gauge_id == gauge_id) return true;
+#else
+  (void)gauge_id;
+#endif
+  return false;
 }

@@ -7,20 +7,24 @@
 #include <time.h>
 
 #include "ap_clients.h"
+#include "board.h"
 #include "config_store.h"
 #include "esp_app_desc.h"
 #include "esp_log.h"
+#include "esp_mac.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
 #include "fs.h"
 #include "http_util.h"
+#include "radio_upload.h"
 #include "status_led.h"
 #include "upload_stats.h"
 #include "wifi_link.h"
 
 static const char *TAG = "forwarder";
+static char s_bridge_id[13];
 
 #define QUERY_BUF 1024
 #define FORWARD_QUEUE_LEN 8
@@ -148,7 +152,10 @@ static int build_query(const char *station_id, const char *key, const char *raw,
        tok = strtok_r(NULL, "&", &saveptr)) {
     const char *eq = strchr(tok, '=');
     size_t klen = eq ? (size_t)(eq - tok) : strlen(tok);
-    if (key_is(tok, klen, "ID") || key_is(tok, klen, "PASSWORD")) {
+    if (key_is(tok, klen, "ID") || key_is(tok, klen, "PASSWORD") ||
+        key_is(tok, klen, "rlsource") || key_is(tok, klen, "sensor_model") ||
+        key_is(tok, klen, "sensor_id") || key_is(tok, klen, "sensor_channel") ||
+        key_is(tok, klen, "bridge_model") || key_is(tok, klen, "bridge_id")) {
       continue;
     }
     int m = snprintf(out + n, outlen - n, "&%s", tok);
@@ -270,10 +277,10 @@ static void rl_mark_sent(uint32_t gauge, int64_t now) {
   s_rl_throttle[oldest].last_send = now;
 }
 
-// Send one captured upload to Rainlog. The console is configured with its
+// Send one captured or encoded radio upload to Rainlog. The console is configured with its
 // Rainlog station id + key directly, so the upload is already correct; we pass
-// it through, appending a rlbridge=<firmware version> marker so the backend can
-// tell the reading came via a wireless bridge (and which firmware). Only the
+// it through, appending firmware, board model and factory-MAC identity so the
+// backend can identify the wireless bridge. Only the
 // Rainlog forward is tagged; the WU relay never sees our private param. If the
 // tagged query would overflow, fall back to the untagged query rather than
 // truncate real reading params.
@@ -282,10 +289,13 @@ static void rl_mark_sent(uint32_t gauge, int64_t now) {
 // reading) - i.e. the reading was delivered to the server. A false return is a
 // transport/non-200 failure worth retrying. Updates the LED / stats / result.
 static bool try_rainlog(const char *raw_query, uint32_t src_ip) {
-  char rl_query[QUERY_BUF];
+  char rl_query[QUERY_BUF + 256];
   const char *rl_send = raw_query;
-  int n = snprintf(rl_query, sizeof(rl_query), "%s&rlbridge=%.16s", raw_query,
-                   esp_app_get_description()->version);
+  char model[128];
+  url_encode(BOARD_ID, model, sizeof(model));
+  int n = snprintf(rl_query, sizeof(rl_query),
+                   "%s&rlbridge=%.16s&bridge_model=%s&bridge_id=%s", raw_query,
+                   esp_app_get_description()->version, model, s_bridge_id);
   if (n > 0 && (size_t)n < sizeof(rl_query)) {
     rl_send = rl_query;
   }
@@ -568,6 +578,8 @@ static void expire_stale(void) {
 // down, so the rest would just rack up 15s timeouts and starve new uploads;
 // they wait for the next interval. An entry is dropped once both targets
 // deliver or it exhausts its live attempts.
+static bool source_conflict(const char *query);
+
 static void retry_pass(void) {
   expire_stale();
   if (s_pending_count == 0 || !wifi_link_sta_has_ip()) {
@@ -575,6 +587,10 @@ static void retry_pass(void) {
   }
   for (int i = s_pending_count - 1; i >= 0; i--) {
     pending_t *e = &s_pending[i];
+    if (source_conflict(e->query)) {
+      buffer_remove(i);
+      continue;
+    }
     bool failed = false;
     if (!e->rainlog_done) {
       e->rainlog_done = try_rainlog(e->query, e->src_ip);
@@ -600,6 +616,17 @@ static void retry_pass(void) {
   }
 }
 
+// Queued/retried uploads must still belong to the configured source.
+static bool source_conflict(const char *query) {
+  bool radio_source = strstr(query, "&rlsource=radio&") != NULL;
+  return config_gauge_uses_radio(parse_rainlog_gauge_id(query)) != radio_source;
+}
+
+static bool enqueue_upload(const char *query, uint32_t src_ip);
+static bool enqueue_radio_upload(const char *query) {
+  return enqueue_upload(query, 0);
+}
+
 // ---- public ---------------------------------------------------------------
 
 static void forwarder_task(void *arg) {
@@ -608,11 +635,12 @@ static void forwarder_task(void *arg) {
     // Wake for a newly captured upload, or wake on the timeout to drain the
     // retry buffer.
     fwd_msg_t *msg = NULL;
-    if (xQueueReceive(s_queue, &msg, pdMS_TO_TICKS(RETRY_INTERVAL_MS)) ==
+    if (xQueueReceive(s_queue, &msg, pdMS_TO_TICKS(1000)) ==
         pdTRUE) {
-      forward_upload(msg->query, msg->src_ip);
+      if (!source_conflict(msg->query)) forward_upload(msg->query, msg->src_ip);
       free(msg);
     }
+    radio_upload_poll(enqueue_radio_upload);
     // Retry the buffer at most once per interval, whether we woke for a new
     // upload or the receive timed out.
     int64_t now = esp_timer_get_time();
@@ -626,12 +654,16 @@ static void forwarder_task(void *arg) {
 }
 
 void forwarder_init(void) {
+  uint8_t mac[6];
+  ESP_ERROR_CHECK(esp_read_mac(mac, ESP_MAC_WIFI_STA));
+  snprintf(s_bridge_id, sizeof(s_bridge_id), "%02x%02x%02x%02x%02x%02x",
+           mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
   s_queue = xQueueCreate(FORWARD_QUEUE_LEN, sizeof(fwd_msg_t *));
   retry_load();  // resume undelivered readings from before the last reboot
   xTaskCreate(forwarder_task, "forwarder", FORWARDER_TASK_STACK, NULL, 3, NULL);
 }
 
-bool forwarder_submit(const char *raw_query, uint32_t src_ip) {
+static bool enqueue_upload(const char *raw_query, uint32_t src_ip) {
   if (s_queue == NULL || raw_query == NULL || raw_query[0] == '\0') {
     return false;
   }
@@ -647,6 +679,12 @@ bool forwarder_submit(const char *raw_query, uint32_t src_ip) {
     return false;
   }
   return true;
+}
+
+bool forwarder_submit(const char *raw_query, uint32_t src_ip) {
+  if (!raw_query || config_gauge_uses_radio(parse_rainlog_gauge_id(raw_query)))
+    return false;
+  return enqueue_upload(raw_query, src_ip);
 }
 
 const char *forwarder_last_result(void) { return s_last_result; }

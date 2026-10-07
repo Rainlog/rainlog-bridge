@@ -10,6 +10,8 @@ struct entry {
   size_t size;
 } entries[24];
 static int count, fail_commit;
+static uint32_t wifi_gauge;
+bool ap_clients_has_gauge(uint32_t gauge) { return gauge && gauge == wifi_gauge; }
 static struct entry *find(const char *key) {
   for (int i = 0; i < count; i++)
     if (!strcmp(entries[i].key, key)) return &entries[i];
@@ -123,6 +125,12 @@ int main(void) {
   assert(!memcmp(&cfg, config_get(), sizeof(cfg)));
   assert(config_find_wu_mapping(123) && !config_find_wu_mapping(124));
   assert(config_find_radio_mapping(0, 4, 0)->gauge_id == 321);
+  assert(config_gauge_uses_radio(321) && !config_gauge_uses_radio(322));
+  wifi_gauge = 321;
+  assert(strstr(config_validate(&cfg), "Wi-Fi device"));
+  assert(config_save(&cfg) == ESP_ERR_INVALID_ARG);
+  wifi_gauge = 0;
+  assert(!config_validate(&cfg));
   assert(!config_find_radio_mapping(0, 5, 0));
   cfg.radio_map[1] = cfg.radio_map[0];
   cfg.radio_map_count = 2;

@@ -173,13 +173,16 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "playwright");
   assert.equal(await page.locator('.radio-card').filter({hasText: 'La Crosse TX5U'}).locator('[data-field=gauge]').count(), 1);
   assert.equal(await page.locator("[data-field=gauge]").inputValue(), "");
   await page.locator("[data-field=gauge]").fill("Rainlog12345");
+  assert.match(await page.locator('[data-field=gauge]').evaluate(input => input.validationMessage), /Wi-Fi device/);
+  await page.locator("[data-field=gauge]").fill("Rainlog12346");
+  assert.equal(await page.locator('[data-field=gauge]').evaluate(input => input.validationMessage), '');
   await page.locator("[data-field=key]").fill("test-pws-key");
   assert.equal(await page.getByRole('button', {name: 'Replace sensor', exact: true}).count(), 0);
   await Promise.all([
     page.waitForResponse(response => response.url().endsWith('/radio')),
     page.evaluate(() => document.dispatchEvent(new Event('visibilitychange'))),
   ]);
-  assert.equal(await page.locator('[data-field=gauge]').inputValue(), 'Rainlog12345');
+  assert.equal(await page.locator('[data-field=gauge]').inputValue(), 'Rainlog12346');
   assert.equal(await page.locator('[data-field=key]').inputValue(), 'test-pws-key');
   await page.getByRole("link", { name: "Devices", exact: true }).click();
   await page.locator("#wuRows .wu").fill("KTESTSTATION");
@@ -198,7 +201,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "playwright");
   assert.equal(saved.get("wu0"), "KTESTSTATION");
   assert.equal(saved.get("wk0"), "test-wu-key");
   assert.equal(saved.get("radio_id0"), "4");
-  assert.equal(saved.get("radio_gauge0"), "Rainlog12345");
+  assert.equal(saved.get("radio_gauge0"), "Rainlog12346");
   assert.equal(saved.get("radio_key0"), "test-pws-key");
   assert.equal(saved.get("radio_enabled"), "on");
   assert.equal(saved.get("wifi_interception_enabled"), null);

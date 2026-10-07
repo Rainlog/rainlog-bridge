@@ -149,6 +149,7 @@ export function createRadio(
     remove.textContent = 'Remove mapping';
     remove.addEventListener('click', () => {
       row.remove();
+      validateGaugeAssignments();
       renderSensors();
     });
     row.append(remove);
@@ -157,6 +158,19 @@ export function createRadio(
     numberRows();
     refreshSensorPickers();
   }
+  const wifiGauges = new Set<number>();
+  function validateGaugeAssignments(): void {
+    const gauges = Array.from(rows.querySelectorAll<HTMLInputElement>('[data-field=gauge]'));
+    const id = (input: HTMLInputElement) => Number(input.value.replace(/^Rainlog/i, ''));
+    gauges.forEach((input) => {
+      const gauge = id(input);
+      input.setCustomValidity(wifiGauges.has(gauge)
+        ? 'This Rainlog gauge is already assigned to a Wi-Fi device.'
+        : gauge && gauges.some((other) => other !== input && id(other) === gauge)
+          ? 'This Rainlog gauge is already assigned to another radio sensor.' : '');
+    });
+  }
+  rows.addEventListener('input', validateGaugeAssignments);
   function numberRows(): void {
     Array.from(rows.querySelectorAll('.radio-row')).forEach((row, index) => {
       row
@@ -369,6 +383,10 @@ export function createRadio(
       ).checked = config.wifi_interception_enabled ?? false;
       (config.radio_map ?? []).forEach(addRow);
       renderSensors();
+    },
+    setWifiGauges(ids: number[]): void {
+      ids.filter((id) => id > 0).forEach((id) => wifiGauges.add(id));
+      validateGaugeAssignments();
     },
     numberRows,
   };

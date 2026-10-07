@@ -36,7 +36,7 @@ uint32_t http_util_peer_ip4(httpd_req_t *req);
 // the request (http_header_generate_string logs "Buffer length is small to
 // fit all the headers", esp_http_client_request_send breaks out with no
 // terminating blank line) and the request stalls to an EAGAIN timeout. 2048
-// covers the forwarder's worst case (QUERY_BUF=1024 query + path + headers)
+// covers the forwarder's worst case (1024-byte captured query + bridge identity + path + headers)
 // with room to spare. Shared by http_util_https_get and the OTA download.
 #define HTTP_UTIL_BUF_SIZE 2048
 

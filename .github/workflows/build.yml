@@ -51,6 +51,8 @@ jobs:
       - uses: actions/checkout@v4
       - run: ./tests/test-display.sh
       - run: ./tests/test-firmware-image.sh
+      - run: ./tests/test-config-store.sh
+      - run: ./tests/test-rain-upload.sh
 
   # The firmware embeds main/web/index.html as a committed generated file, so a
   # stale commit would ship a page that does not match web/src/. Rebuild it and

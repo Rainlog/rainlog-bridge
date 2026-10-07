@@ -49,7 +49,9 @@ Rainlog station ID and PWS key. Add mapping on a detected sensor card supplies i
 automatically. Saved mappings remain intact when a sensor
 has not been heard since reboot. Bridge Wi-Fi fields and their password toggle are disabled while interception
 is unchecked; saved credentials are retained. Settings apply after reboot.
-Rainfall forwarding from those mappings is still pending.
+Mapped radio rainfall uploads through the shared forwarder and retry buffer.
+A gauge already used by a detected Wi-Fi device cannot also be radio-mapped;
+radio-assigned gauges reject intercepted Wi-Fi uploads.
 
 `tests/test-radio-web.cjs` exercises the generated pages in Chromium with
 fixture API responses. It requires Playwright; set `PLAYWRIGHT_MODULE` to an

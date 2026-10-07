@@ -16,6 +16,8 @@ idf_component_register(
         "config_store.c"
         "radio/radio.c"
         "radio/weather_decode.c"
+        "radio/rain_upload.c"
+        "radio/radio_upload.c"
         "activity.c"
         "net/wifi_link.c"
         "net/time_sync.c"

@@ -1,4 +1,5 @@
 #include "ap_clients.h"
+#include "ap_client_gauges.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -152,6 +153,16 @@ static ap_client_t *find_by_ip(uint32_t ip4) {
     }
   }
   return NULL;
+}
+
+bool ap_clients_has_gauge(uint32_t gauge) {
+  if (!s_lock || !gauge) return false;
+  bool found = false;
+  xSemaphoreTake(s_lock, portMAX_DELAY);
+  for (int i = 0; i < s_count; i++)
+    found |= s_clients[i].gauge_id == gauge;
+  xSemaphoreGive(s_lock);
+  return found;
 }
 
 void ap_clients_note_upload(uint32_t ip4, uint32_t gauge_id) {

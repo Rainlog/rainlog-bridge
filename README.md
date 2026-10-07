@@ -148,11 +148,18 @@ Uploads are captured by impersonating Weather Underground on the bridge side:
 3. It answers `success` immediately and queues the raw query, so a slow uplink
    never stalls the console.
 4. `forward/forwarder.c` sends the reading to Rainlog, appending an
-   `rlbridge=<version>` marker, and relays to the real WU with the ID and
+   `rlbridge=<version>`, `bridge_model` and stable MAC-based `bridge_id`
+   markers, and relays to the real WU with the ID and
    password rewritten when a mapping is configured. Readings timestamped `now`
    are throttled to one per gauge per 305 s to stay inside Rainlog's limit;
    intermediate ones are dropped rather than buffered. Readings carrying a real
    timestamp are never throttled, and the WU relay is never throttled.
+
+Mapped radio sensors use the same forwarder and retry buffer. They send reception-
+timestamped cumulative `totalrainin` snapshots every 305 seconds, plus individual
+sensor model, ID and channel fields. Counter state is persisted in NVS before
+upload. Radio-assigned gauges reject intercepted Wi-Fi uploads, so one gauge
+cannot mix the two counter sources. See [radio upload details](main/radio/README.md#radio-uploads).
 
 The bridge also NATs for its clients, so the console gets real internet for NTP
 and vendor services. Some consoles refuse to upload until their clock syncs.

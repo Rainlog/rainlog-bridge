@@ -64,18 +64,25 @@ static esp_err_t wu_upload_handler(httpd_req_t *req) {
   }
   char *params = read_upload_params(req);
 
-  // Answer the station first: it only needs the literal body "success", and
-  // must not wait out our (slow, TLS) forwarding - the forwarder task does
-  // that work off this thread.
   httpd_resp_set_type(req, "text/plain");
-  httpd_resp_sendstr(req, "success");
-
-  if (params != NULL) {
-    ESP_LOGI(TAG, "captured upload (%u bytes)", (unsigned)strlen(params));
-    uint32_t peer = http_util_peer_ip4(req);
+  uint32_t peer = http_util_peer_ip4(req);
+  uint32_t gauge = 0;
+  if (params) {
     char station_id[64] = {0};
     http_util_form_get(params, "ID", station_id, sizeof(station_id));
-    ap_clients_note_upload(peer, config_parse_gauge_id(station_id, true));
+    gauge = config_parse_gauge_id(station_id, true);
+  }
+  if (config_gauge_uses_radio(gauge)) {
+    ap_clients_note_error(peer, AP_CLIENT_ERR_RL_REJECT, "RADIOASSIGNED");
+    free(params);
+    return httpd_resp_sendstr(req, "RADIOASSIGNED");
+  }
+  // Answer without waiting for TLS. Radio-assigned gauges never enter this
+  // queue through Wi-Fi, so the two counter baselines cannot be mixed.
+  httpd_resp_sendstr(req, "success");
+  if (params) {
+    ESP_LOGI(TAG, "captured upload (%u bytes)", (unsigned)strlen(params));
+    ap_clients_note_upload(peer, gauge);
     forwarder_submit(params, peer);
     free(params);
   }

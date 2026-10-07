@@ -714,7 +714,9 @@ async function pollDevices(): Promise<void> {
   try {
     if (wifiInterceptionActive) {
       const clients = (await (await fetch('/clients')).json()) as ApClient[];
-      refreshKnownGauges(clients.map((client) => client.gauge_id ?? 0));
+      const gauges = clients.map((client) => client.gauge_id ?? 0);
+      refreshKnownGauges(gauges);
+      radio?.setWifiGauges(gauges);
       renderDevices(clients);
     }
   } catch {

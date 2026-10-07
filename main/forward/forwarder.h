@@ -1,6 +1,6 @@
 // Rainlog Wireless Bridge - upload forwarder.
 //
-// Takes the raw query string captured from a station's WU upload, re-sends it
+// Takes encoded radio readings and the raw query string captured from a station's WU upload, re-sends it
 // to Rainlog with the Rainlog credentials swapped in, and (optionally) replays
 // it to the real Weather Underground with the configured WU credentials.
 // Forwarding runs on its own task so the capture handler can answer the
@@ -20,7 +20,7 @@ void forwarder_init(void);
 // uploading station's SoftAP address (network byte order, 0 = unknown), used
 // to credit the per-client forwarded count once Rainlog accepts. Copies the
 // string; returns false if the queue is full (upload dropped) or on alloc
-// failure.
+// failure. Radio-reserved gauges reject Wi-Fi submission.
 bool forwarder_submit(const char *raw_query, uint32_t src_ip);
 
 // Short status of the most recent Rainlog forward, for the UI:

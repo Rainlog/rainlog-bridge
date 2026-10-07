@@ -117,3 +117,5 @@ const radio_mapping_t *config_find_radio_mapping(uint8_t model,
 
 // True when the bridge hosts station Wi-Fi and intercepts WU uploads.
 bool config_wifi_interception_enabled(void);
+// Radio mappings reserve their Rainlog gauge exclusively, even while paused.
+bool config_gauge_uses_radio(uint32_t gauge_id);
