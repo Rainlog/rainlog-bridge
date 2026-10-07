@@ -54,9 +54,9 @@ static int rssi_level(int rssi) {
 // Draw a 4-bar signal indicator with its bottom at y_base; bars rise to the
 // right. Active bars colored by strength, the rest dim.
 static void draw_signal_bars(int x, int y_base, int level) {
-  uint16_t on =
+  display_color_t on =
       level >= 3 ? COLOR_GREEN : (level == 2 ? COLOR_AMBER : COLOR_RED);
-  uint16_t off = display_rgb(70, 70, 70);
+  display_color_t off = display_rgb(70, 70, 70);
   for (int i = 0; i < 4; i++) {
     int h = (i + 1) * 3;
     display_fill_rect(x + i * 4, y_base - h, 3, h, i < level ? on : off);
@@ -64,7 +64,7 @@ static void draw_signal_bars(int x, int y_base, int level) {
 }
 
 #if SHOW_LAST_AND_UPTIME
-static uint16_t result_color(const char *r) {
+static display_color_t result_color(const char *r) {
   if (strcmp(r, "OK") == 0) {
     return COLOR_GREEN;
   }
@@ -129,7 +129,7 @@ void screen_status_draw(void) {
 
   // Rainlog successes: the headline counts, highlighted bold; blue, or red
   // when nothing has come in for a day (likely a problem).
-  uint16_t blue = display_rgb(96, 176, 255);
+  display_color_t blue = display_rgb(96, 176, 255);
   int c24 = upload_stats_count_last_24h(UPLOAD_TARGET_RL);
   snprintf(buf, sizeof(buf), "RL: %d 24h, %lu total", c24,
            (unsigned long)upload_stats_total(UPLOAD_TARGET_RL));
@@ -174,7 +174,7 @@ void screen_status_draw(void) {
   // Column header so the per-client counts read as a table: bold, a notch
   // dimmer than the data rows so it still reads as a heading.
   if (any_listed && y <= y_clients_last) {
-    uint16_t hdr = display_rgb(160, 160, 160);
+    display_color_t hdr = display_rgb(160, 160, 160);
     display_text_bold(X_TEXT, y, 1, hdr, "device");
     const char *cols = "rcvd/sent";
     display_text_bold(DISPLAY_W - X_TEXT - (int)strlen(cols) * GLYPH, y, 1, hdr,

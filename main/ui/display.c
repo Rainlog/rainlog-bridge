@@ -1,18 +1,31 @@
 #include "display.h"
 
+#include <string.h>
+
 #include "display_panel.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#if BOARD_DISPLAY_FONT == BOARD_FONT_6X10
+#include "font6x10.h"
+#define DISPLAY_FONT_REGULAR font6x10
+#define DISPLAY_FONT_BOLD font6x10_bold
+#else
 #include "font8x13.h"
+#define DISPLAY_FONT_REGULAR font8x13
+#define DISPLAY_FONT_BOLD font8x13_bold
+#endif
 
 static const char *TAG = "display";
 #define FB_PIXELS (DISPLAY_W * DISPLAY_H)
-static uint16_t *s_fb;
+static display_color_t *s_fb;
 
-uint16_t display_rgb(uint8_t r, uint8_t g, uint8_t b) {
-  // Keep RGB565 in native memory order; the LCD backend configures RAMCTRL
-  // for this byte order, and the OLED backend packs it into monochrome pages.
-  return (uint16_t)(((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
+display_color_t display_rgb(uint8_t r, uint8_t g, uint8_t b) {
+#if BOARD_DISPLAY_SSD1306
+  return (r | g | b) != 0;
+#else
+  // The LCD backend configures RAMCTRL for native RGB565 byte order.
+  return (display_color_t)(((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
+#endif
 }
 
 bool display_init(void) {
@@ -20,7 +33,11 @@ bool display_init(void) {
     ESP_LOGE(TAG, "panel initialization failed");
     return false;
   }
-  s_fb = heap_caps_malloc(FB_PIXELS * sizeof(uint16_t), MALLOC_CAP_DMA);
+#if BOARD_DISPLAY_SSD1306
+  s_fb = heap_caps_malloc(DISPLAY_FB_BYTES, MALLOC_CAP_8BIT);
+#else
+  s_fb = heap_caps_malloc(DISPLAY_FB_BYTES, MALLOC_CAP_DMA);
+#endif
   if (s_fb == NULL) {
     ESP_LOGE(TAG, "framebuffer allocation failed");
     return false;
@@ -33,25 +50,38 @@ bool display_init(void) {
   return true;
 }
 
-void display_clear(uint16_t color) {
-  uint16_t *fb = s_fb;
+void display_clear(display_color_t color) {
+  display_color_t *fb = s_fb;
   if (fb == NULL) {
     return;
   }
+#if BOARD_DISPLAY_SSD1306
+  memset(fb, color ? 0xff : 0, DISPLAY_FB_BYTES);
+#else
   for (int i = 0; i < FB_PIXELS; i++) {
     fb[i] = color;
   }
+#endif
 }
 
-static void put_pixel(int x, int y, uint16_t color) {
+static void put_pixel(int x, int y, display_color_t color) {
   if (s_fb == NULL || x < 0 || x >= DISPLAY_W || y < 0 || y >= DISPLAY_H) {
     return;
   }
+#if BOARD_DISPLAY_SSD1306
+  uint8_t *page = &s_fb[(y / 8) * DISPLAY_W + x];
+  uint8_t mask = 1U << (y % 8);
+  if (color)
+    *page |= mask;
+  else
+    *page &= (uint8_t)~mask;
+#else
   s_fb[y * DISPLAY_W + x] = color;
+#endif
 }
 
 static void draw_text(const uint8_t font[128][GLYPH_H], int x, int y, int scale,
-                      uint16_t color, const char *str) {
+                      display_color_t color, const char *str) {
   if (s_fb == NULL || scale < 1) {
     return;
   }
@@ -79,16 +109,17 @@ static void draw_text(const uint8_t font[128][GLYPH_H], int x, int y, int scale,
   }
 }
 
-void display_text(int x, int y, int scale, uint16_t color, const char *str) {
-  draw_text(font8x13, x, y, scale, color, str);
+void display_text(int x, int y, int scale, display_color_t color,
+                  const char *str) {
+  draw_text(DISPLAY_FONT_REGULAR, x, y, scale, color, str);
 }
 
-void display_text_bold(int x, int y, int scale, uint16_t color,
+void display_text_bold(int x, int y, int scale, display_color_t color,
                        const char *str) {
-  draw_text(font8x13_bold, x, y, scale, color, str);
+  draw_text(DISPLAY_FONT_BOLD, x, y, scale, color, str);
 }
 
-void display_fill_rect(int x, int y, int w, int h, uint16_t color) {
+void display_fill_rect(int x, int y, int w, int h, display_color_t color) {
   for (int dy = 0; dy < h; dy++) {
     for (int dx = 0; dx < w; dx++) {
       put_pixel(x + dx, y + dy, color);

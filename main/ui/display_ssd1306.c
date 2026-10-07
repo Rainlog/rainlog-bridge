@@ -5,12 +5,10 @@
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_panel_ops.h"
 #include "esp_lcd_panel_vendor.h"
-#include "ssd1306_pixels.h"
 
 static const char *TAG = "display_ssd1306";
 static esp_lcd_panel_handle_t s_panel;
 static esp_lcd_panel_io_handle_t s_io;
-static uint8_t s_pages[BOARD_DISPLAY_W * BOARD_DISPLAY_H / 8];
 static int s_brightness = -1;
 
 esp_err_t display_panel_init(void) {
@@ -51,12 +49,11 @@ esp_err_t display_panel_init(void) {
   return esp_lcd_panel_disp_on_off(s_panel, true);
 }
 
-esp_err_t display_panel_flush(const uint16_t *pixels) {
-  ssd1306_pack_pixels(pixels, s_pages);
-  // ESP-IDF's I2C panel IO transmits synchronously. Both buffers are free
+esp_err_t display_panel_flush(const display_color_t *pixels) {
+  // ESP-IDF's I2C panel IO transmits synchronously. The framebuffer is free
   // for reuse when this returns; no SPI-style DMA semaphore is needed.
   return esp_lcd_panel_draw_bitmap(s_panel, 0, 0, BOARD_DISPLAY_W,
-                                   BOARD_DISPLAY_H, s_pages);
+                                   BOARD_DISPLAY_H, pixels);
 }
 
 esp_err_t display_panel_brightness(uint8_t percent) {
@@ -66,7 +63,7 @@ esp_err_t display_panel_brightness(uint8_t percent) {
                         "power");
   }
   if (percent != 0) {
-    uint8_t contrast = (uint16_t)percent * 255 / 100;
+    uint8_t contrast = (unsigned)percent * 255 / 100;
     ESP_RETURN_ON_ERROR(esp_lcd_panel_io_tx_param(s_io, 0x81, &contrast, 1),
                         TAG, "contrast");
   }

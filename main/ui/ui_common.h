@@ -3,6 +3,8 @@
 
 #include <stdint.h>
 
+#include "display.h"
+
 // Top-of-screen header band height anchor (logo pixmap + version line).
 #define Y_HEADER 8
 
@@ -12,7 +14,7 @@
 #define Y_CONTENT_TOP 82
 
 // Draw a string horizontally centered at row y.
-void ui_center_text(int y, int scale, uint16_t color, const char *s);
+void ui_center_text(int y, int scale, display_color_t color, const char *s);
 
 // Draw the common header: the raindrop + "Rainlog / Bridge" logo pixmap and
 // the firmware version line.

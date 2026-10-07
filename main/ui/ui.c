@@ -34,10 +34,14 @@ static const char *TAG = "ui";
 #define BL_DIM_AFTER_US (30 * 1000 * 1000)
 
 #if BOARD_DISPLAY_SSD1306
+#define OLED_COLUMNS (DISPLAY_W / GLYPH)
+#define OLED_ROWS (DISPLAY_H / GLYPH_H)
+#define OLED_ROW_HEIGHT (DISPLAY_H / OLED_ROWS)
+
 static void oled_line(int row, const char *text) {
-  char line[DISPLAY_W / GLYPH + 1];
+  char line[OLED_COLUMNS + 1];
   snprintf(line, sizeof(line), "%s", text);
-  display_text(0, row * 16, 1, COLOR_WHITE, line);
+  display_text(0, row * OLED_ROW_HEIGHT, 1, COLOR_WHITE, line);
 }
 
 static void oled_draw(uint32_t held) {
@@ -54,19 +58,30 @@ static void oled_draw(uint32_t held) {
   }
   const bridge_config_t *cfg = config_get();
   if (!config_is_provisioned()) {
-    // Cycle long credentials in 16-character chunks so the complete SSID
+    // Cycle long credentials in screen-width chunks so the complete SSID
     // and password remain readable on the small display.
     unsigned page = (unsigned)(esp_timer_get_time() / 3000000);
-    unsigned ssid_parts = (strlen(cfg->ap_ssid) + 15) / 16;
-    unsigned pass_parts = (strlen(cfg->ap_pass) + 15) / 16;
+    unsigned ssid_parts =
+        (strlen(cfg->ap_ssid) + OLED_COLUMNS - 1) / OLED_COLUMNS;
+    unsigned pass_parts =
+        (strlen(cfg->ap_pass) + OLED_COLUMNS - 1) / OLED_COLUMNS;
     if (ssid_parts == 0) ssid_parts = 1;
     if (pass_parts == 0) pass_parts = 1;
+#if OLED_ROWS >= 6
+    oled_line(0, "Wi-Fi network:");
+    oled_line(1, cfg->ap_ssid + (page % ssid_parts) * OLED_COLUMNS);
+    oled_line(2, "Password:");
+    oled_line(3, cfg->ap_pass + (page % pass_parts) * OLED_COLUMNS);
+    oled_line(4, "Open in browser:");
+    wifi_link_ap_ip_str(line, sizeof(line));
+    oled_line(5, line);
+#else
     oled_line(0, "JOIN BRIDGE WIFI");
-    // Labels occupy their own header; the full width is used for values.
-    oled_line(1, cfg->ap_ssid + (page % ssid_parts) * 16);
-    oled_line(2, cfg->ap_pass + (page % pass_parts) * 16);
+    oled_line(1, cfg->ap_ssid + (page % ssid_parts) * OLED_COLUMNS);
+    oled_line(2, cfg->ap_pass + (page % pass_parts) * OLED_COLUMNS);
     wifi_link_ap_ip_str(line, sizeof(line));
     oled_line(3, line);
+#endif
   } else {
     oled_line(0, "Rainlog Bridge");
     snprintf(line, sizeof(line), "WiFi %s",
@@ -76,7 +91,17 @@ static void oled_draw(uint32_t held) {
              (unsigned long)upload_stats_total(UPLOAD_TARGET_RL),
              forwarder_pending_count());
     oled_line(2, line);
+#if OLED_ROWS >= 6
+    snprintf(line, sizeof(line), "WU %lu",
+             (unsigned long)upload_stats_total(UPLOAD_TARGET_WU));
+    oled_line(3, line);
+    snprintf(line, sizeof(line), "Wi-Fi clients: %d",
+             wifi_link_ap_station_count());
+    oled_line(4, line);
+    oled_line(5, forwarder_last_result());
+#else
     oled_line(3, forwarder_last_result());
+#endif
   }
 }
 #endif

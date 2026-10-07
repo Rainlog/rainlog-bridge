@@ -11,7 +11,9 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+#if !BOARD_DISPLAY_SSD1306
 static const char *TAG = "status_led";
+#endif
 
 // Dim level: the onboard WS2812 is bright; keep status colors easy on the eyes.
 #define LED_LEVEL 24

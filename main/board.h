@@ -7,12 +7,18 @@
 
 #include "sdkconfig.h"
 
+#define BOARD_FONT_6X10 610
+#define BOARD_FONT_8X13 813
+
 #if CONFIG_IDF_TARGET_ESP32
 // LILYGO T3 LoRa32 V1.6.1, 433 MHz SX1278 variant.
 #define BOARD_ID "lilygo-t3-v1.6.1-sx1278"
 #define BOARD_DISPLAY_SSD1306 1
 #define BOARD_DISPLAY_W 128
 #define BOARD_DISPLAY_H 64
+#ifndef BOARD_DISPLAY_FONT
+#define BOARD_DISPLAY_FONT BOARD_FONT_6X10
+#endif
 #define BOARD_I2C_SDA_GPIO 21
 #define BOARD_I2C_SCL_GPIO 22
 #define BOARD_OLED_ADDRESS 0x3C
@@ -22,6 +28,9 @@
 #define BOARD_DISPLAY_SSD1306 0
 #define BOARD_DISPLAY_W 172
 #define BOARD_DISPLAY_H 320
+#ifndef BOARD_DISPLAY_FONT
+#define BOARD_DISPLAY_FONT BOARD_FONT_8X13
+#endif
 // Board identity, published in the OTA manifest ("board"), checked by the
 // firmware so a device never applies another board's image, and used to derive
 // the manifest filename (see CFG_OTA_MANIFEST_PATH). It encodes the chip's

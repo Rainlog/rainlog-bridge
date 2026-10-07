@@ -7,7 +7,7 @@
 #include "esp_app_desc.h"
 #include "header_logo.h"
 
-void ui_center_text(int y, int scale, uint16_t color, const char *s) {
+void ui_center_text(int y, int scale, display_color_t color, const char *s) {
   int w = (int)strlen(s) * GLYPH * scale;
   int x = (DISPLAY_W - w) / 2;
   if (x < 0) {

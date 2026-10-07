@@ -18,6 +18,7 @@ echo "clang-format: main/"
 find main \( -name '*.c' -o -name '*.h' \) \
   ! -name 'font8x8_basic.h' \
   ! -name 'font8x13.h' \
+  ! -name 'font6x10.h' \
   ! -name 'favicon32.h' \
   ! -name 'header_logo.h' \
   ! -name 'oui_table.h' \

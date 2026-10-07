@@ -137,7 +137,7 @@ esp_err_t display_panel_init(void) {
   return ledc_channel_config(&channel);
 }
 
-esp_err_t display_panel_flush(const uint16_t *pixels) {
+esp_err_t display_panel_flush(const display_color_t *pixels) {
   esp_err_t err = esp_lcd_panel_draw_bitmap(s_panel, 0, 0, BOARD_DISPLAY_W,
                                             BOARD_DISPLAY_H, pixels);
   if (err == ESP_OK) xSemaphoreTake(s_done, portMAX_DELAY);
