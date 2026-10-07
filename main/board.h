@@ -1,7 +1,7 @@
 // Rainlog Wireless Bridge - board pin map (Waveshare ESP32-C6-LCD-1.47).
 //
 // Single source of truth for GPIO assignments (DRY). Values from the official
-// Waveshare demo drivers (see README.md / ./fetch-demo.sh). LCD/SD pins are
+// Waveshare demo drivers (see README.md / ./fetch-demos.sh). LCD/SD pins are
 // listed for when the LCD UI lands.
 
 #pragma once

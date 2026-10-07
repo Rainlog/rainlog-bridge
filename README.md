@@ -234,8 +234,12 @@ Node, so the firmware build never runs npm. CI fails if it is stale.
 
 ### Reference drivers
 
-`./fetch-demo.sh` downloads the official Waveshare demo (about 60MB, gitignored)
-for working ST7789, WS2812, SPI, and SD init sequences.
+`./fetch-demos.sh` downloads both official reference projects locally (gitignored):
+
+- `ESP32-C6-LCD-1.47-Demo/`: Waveshare examples for ST7789, WS2812, SPI, and SD init sequences.
+- `LilyGo-LoRa-Series/`: LILYGO examples and prebuilt firmware for the T3 LoRa32 V1.6.1, including the 433 MHz SX1278 variant. Select `T3_V1_6_SX1278` in an example's `utilities.h`. Start with `examples/ArduinoLoRa/LoRaReceiver/` or `LoRaSender/`; prebuilt 433 MHz V1.6.1 samples are under `firmware/`.
+
+Existing demos are skipped. Use `./fetch-demos.sh --force` to re-download and overwrite both. The LILYGO download follows upstream `master`; it is reference code, not a pinned firmware build dependency.
 
 ## Firmware updates (OTA)
 

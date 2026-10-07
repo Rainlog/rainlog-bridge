@@ -12,10 +12,13 @@ sdkconfig.old
 # Local secrets (WiFi password, Rainlog PWS key) once config is added
 main/config.h
 
-# Waveshare demo archive: ~60MB, download on demand via ./fetch-demo.sh.
+# Waveshare demo archive: ~60MB, download on demand via ./fetch-demos.sh.
 # Track only the placeholder so the directory exists.
 ESP32-C6-LCD-1.47-Demo/*
 !ESP32-C6-LCD-1.47-Demo/.keep
+
+# LILYGO reference examples and prebuilt sample firmware.
+LilyGo-LoRa-Series/
 
 # Generator input caches (gen-oui.py, gen-font.py); re-downloaded on demand.
 # The generated main/net/oui_table.h and main/ui/font8x13.h ARE committed.
