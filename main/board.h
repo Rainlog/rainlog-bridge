@@ -35,6 +35,7 @@
 #define BOARD_RADIO_DIO1_GPIO 33
 #define BOARD_RADIO_DIO2_GPIO 32
 #define BOARD_STATUS_LED_GPIO 25
+// Optional external button to ground. This board only has an onboard RST button.
 #define BOARD_BOOT_BUTTON_GPIO 0
 #elif CONFIG_IDF_TARGET_ESP32C6
 #define BOARD_DISPLAY_SSD1306 0

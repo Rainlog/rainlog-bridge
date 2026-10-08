@@ -1,5 +1,5 @@
-// Rainlog Wireless Bridge - BOOT button (the only user input on this non-touch
-// board). A press pokes the shared activity signal (see activity.h) so the UI
+// Rainlog Wireless Bridge - C6 BOOT button or optional LILYGO GPIO0 button.
+// A press pokes the shared activity signal (see activity.h) so the UI
 // brightens the backlight; a sustained hold drives the factory-reset countdown.
 #pragma once
 

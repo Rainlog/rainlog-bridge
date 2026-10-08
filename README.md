@@ -110,8 +110,8 @@ password.
 
 ### Buttons
 
-- **BOOT tap**: wakes the backlight, which dims after 30 seconds idle.
-- **BOOT held about 11 seconds**: factory reset. Wipes configuration, device
+- **C6 BOOT tap**: wakes the backlight, which dims after 30 seconds idle.
+- **C6 BOOT held about 11 seconds**: factory reset. Wipes configuration, device
   names, and stored statistics.
 
 ## How it works
@@ -177,7 +177,9 @@ demo claiming 4MB. Check yours with `esptool flash-id`.
 **LILYGO T3 LoRa32 V1.6.1 (433 MHz SX1278).** Our board identifies as an
 ESP32-PICO-D4 with 4MB flash. Its 128x64 SSD1306 OLED uses I2C address `0x3C`,
 SDA GPIO21 and SCL GPIO22. It has a single-color status LED on GPIO25 and a
-BOOT button on GPIO0. The SX1278 supports receive-only La Crosse TX5U and AcuRite Iris OOK
+RST button wired to the chip reset input, with no onboard BOOT/user button.
+The firmware monitors GPIO0 for an optional external button to ground; holding
+RST cannot trigger the hold countdown. The SX1278 supports receive-only La Crosse TX5U and AcuRite Iris OOK
 reception. See [weather radio reception](main/radio/README.md) for build
 options and console controls.
 
