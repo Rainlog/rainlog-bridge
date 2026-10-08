@@ -6,6 +6,7 @@
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 static bridge_config_t config;
 static radio_sensor_t sensor;
 static rain_counter_t saved, saved_wu;
@@ -22,6 +23,11 @@ const radio_mapping_t *config_find_radio_mapping(uint8_t model, uint32_t id, cha
   return NULL;
 }
 int64_t esp_timer_get_time(void) { return now; }
+time_t time(time_t *out) {
+  time_t wall = 1700000000 + now / 1000000;
+  if (out) *out = wall;
+  return wall;
+}
 void radio_status(radio_status_t *out) { *out = (radio_status_t){.receiving = receiving}; }
 size_t radio_sensors(radio_sensor_t *out, size_t count) {
   assert(count); *out = sensor; return 1;
@@ -79,12 +85,18 @@ int main(void) {
   now += 300000000; sensor.reading.received_us = now;
   radio_upload_poll(send_query);
   assert(sends == 2 && strstr(latest, "totalrainin=0.042000"));
-  now += 310000000;
+  char previous_query[sizeof(latest)];
+  snprintf(previous_query, sizeof(previous_query), "%s", latest);
+  now += 299999999;
   radio_upload_poll(send_query);
-  assert(sends == 2); // Old inventory does not become new weather.
+  assert(sends == 2); // No repeat before 300 seconds.
+  now++;
+  radio_upload_poll(send_query);
+  assert(sends == 3 && strstr(latest, "totalrainin=0.042000")); // Cached snapshot at exactly 300s.
+  assert(strcmp(previous_query, latest)); // The repeated total has a new snapshot timestamp.
   sensor.reading.received_us = now;
   radio_upload_poll(send_query);
-  assert(sends == 3); // Fresh dry-weather baseline after interval.
+  assert(sends == 3); // A fresh duplicate does not bypass the interval.
   receiving = false; now += 310000000; sensor.reading.received_us = now;
   radio_upload_poll(send_query);
   assert(sends == 3);
@@ -119,5 +131,5 @@ int main(void) {
   now += 310000000; sensor.reading.received_us = now;
   radio_upload_poll(send_query);
   assert(sends == previous + 2); // Two uploaders share one sensor submission.
-  puts("Radio uploader mapping, cadence, snapshot deduplication, storage failure and recovery passed");
+  puts("Radio uploader mapping, cadence, periodic snapshots, storage failure and recovery passed");
 }

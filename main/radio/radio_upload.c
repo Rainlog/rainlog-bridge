@@ -11,13 +11,13 @@
 #include "rain_upload.h"
 
 static const char *TAG = "radio-upload";
-// Rainlog's one-reading-per-300-second limit, with the forwarder's 5s margin.
-#define UPLOAD_INTERVAL_US ((int64_t)305 * 1000000)
+// Rainlog requires periodic counter snapshots, including unchanged totals.
+#define UPLOAD_INTERVAL_US ((int64_t)300 * 1000000)
 static struct {
   uint32_t gauge;
   char storage_key[16];
   rain_counter_t counter;
-  int64_t last_upload, last_reading;
+  int64_t last_upload;
   bool dirty;
 } states[RADIO_MAP_MAX + WU_MAP_MAX];
 
@@ -100,20 +100,17 @@ void radio_upload_poll(bool (*submit)(const char *)) {
       }
       states[i].dirty = false;
     }
-    // Repeated frames do not trigger repeated uploads. Unchanged counters still
-    // send periodic live snapshots, giving Rainlog a dry-weather baseline.
-    if (reading->received_us == states[i].last_reading ||
-        (states[i].last_upload && now - states[i].last_upload < UPLOAD_INTERVAL_US))
+    // Publish the latest counter every 300 seconds, even without a new frame.
+    if (states[i].last_upload && now - states[i].last_upload < UPLOAD_INTERVAL_US)
       continue;
     time_t observed = wall;
     if (observed < 1600000000) continue; // Wait for SNTP; never backdate with "now".
-    observed -= (now - reading->received_us) / 1000000;
+    // This is a current counter snapshot; retries retain this timestamp.
     char query[768];
     if (!rain_upload_encode(query, sizeof(query), map.gauge_id, map.rainlog_key,
                             &reading->packet, states[i].counter.total_microin, observed))
       continue;
     if (submit(query)) {
-      states[i].last_reading = reading->received_us;
       states[i].last_upload = now;
     }
   }

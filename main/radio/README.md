@@ -95,10 +95,10 @@ keep setup Wi-Fi available until provisioning. Saved choices override defaults.
 
 Sensors with a Rainlog or device-keyed WU uploader and a decoded rain counter upload. The forwarder task
 polls the latest sensor inventory each second and queues encoded snapshots,
-so TLS never runs in the pulse capture task or on the encoder call stack. Each gauge emits at most one fresh snapshot every 305 seconds
-(Rainlog accepts one per 300 seconds); repeated frames and stale inventory do
-not create extra readings. SNTP must establish a wall clock first. `dateutc`
-is the reception time, preserved through the existing LittleFS retry queue.
+so TLS never runs in the pulse capture task or on the encoder call stack. Each gauge queues a snapshot every 300 seconds, including unchanged totals
+and cached readings when no new frame has arrived. SNTP must establish a wall
+clock first. `dateutc` is the snapshot time, preserved through the existing
+LittleFS retry queue.
 
 `ID=Rainlog<gauge_id>` and `PASSWORD=<PWS key>` come from the saved Rainlog mapping. WU-only sensors omit these credentials and skip Rainlog entirely; WU credentials are selected by model/ID/channel. Combined uploaders share one encoded snapshot. Legacy WU gauge mappings remain readable and keep working.
 `totalrainin` is the cumulative counter in inches, using 0.0105 in per TX5U tip

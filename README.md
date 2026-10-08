@@ -147,8 +147,8 @@ Uploads are captured by impersonating Weather Underground on the bridge side:
    intermediate ones are dropped rather than buffered. Readings carrying a real
    timestamp are never throttled, and the WU relay is never throttled.
 
-Mapped radio sensors use the same forwarder and retry buffer. They send reception-
-timestamped cumulative `totalrainin` snapshots every 305 seconds, plus individual
+Mapped radio sensors use the same forwarder and retry buffer. They send snapshot-
+timestamped cumulative `totalrainin` snapshots every 300 seconds (including unchanged totals), plus individual
 sensor model, ID and channel fields. Counter state is persisted in NVS before
 upload. Radio-assigned gauges reject intercepted Wi-Fi uploads, so one gauge
 cannot mix the two counter sources. See [radio upload details](main/radio/README.md#radio-uploads).
