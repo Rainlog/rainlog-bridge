@@ -2,7 +2,7 @@
 cmake_minimum_required(VERSION 3.16)
 
 # Firmware version (shown on the LCD and in esp_app_desc). Bump manually.
-set(PROJECT_VER "1.0.1")
+set(PROJECT_VER "1.0.2")
 option(RAINLOG_DEBUG_CONSOLE "Enable MeshCore-style serial debug console" OFF)
 
 if(IDF_TARGET STREQUAL "esp32" OR "$ENV{IDF_TARGET}" STREQUAL "esp32")
