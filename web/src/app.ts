@@ -345,7 +345,9 @@ function refreshUploaderButtons(): void {
       // updates the same card and carries its uploader to the new identity.
       own.querySelector<HTMLInputElement>('.wd')!.value = device;
     }
-    const rainlogAction = card.querySelector('.mapping-action, .wifi-rainlog-action:not([hidden])');
+    const rainlogAction = card.querySelector(
+      '.mapping-action, .wifi-rainlog-action:not([hidden])',
+    );
     if (rainlogAction) card.querySelector('.device-actions')!.append(button);
     else card.append(button);
     button.hidden = own !== null;
@@ -495,7 +497,9 @@ const otaStat = (html: string): void => {
 };
 
 let otaPolling = false;
-const manualUpdate = createManualUpdate();
+let otaTimer: ReturnType<typeof setTimeout> | undefined;
+let otaBusy = false;
+const manualUpdate = createManualUpdate(() => pollOta());
 
 function renderOta(s: OtaStatus): void {
   manualUpdate.setStatus(s);
@@ -503,8 +507,10 @@ function renderOta(s: OtaStatus): void {
   el('hardwareTag').textContent = s.board ? `Hardware tag: ${s.board}` : '';
   const apply = el('otaApplyBtn') as HTMLButtonElement;
   const check = el('otaCheckBtn') as HTMLButtonElement;
-  apply.hidden = !s.available || s.phase === 'updating';
-  check.disabled = s.phase === 'checking' || s.phase === 'updating';
+  otaBusy = s.phase === 'checking' || s.phase === 'updating';
+  apply.hidden = !s.available || otaBusy;
+  apply.disabled = otaBusy || manualUpdate.isBusy();
+  check.disabled = otaBusy || manualUpdate.isBusy();
   el('fwWarn').hidden = !s.available; // out-of-date marker on the tab itself
   switch (s.phase) {
     case 'checking':
@@ -531,59 +537,79 @@ function renderOta(s: OtaStatus): void {
 
 async function fetchOta(): Promise<OtaStatus | null> {
   try {
-    return (await (await fetch('/ota/status')).json()) as OtaStatus;
+    const response = await fetch('/ota/status', {
+      cache: 'no-store',
+      signal: AbortSignal.timeout(5000),
+    });
+    if (response.status === 401) {
+      otaStat('Session expired. Reload and sign in to check firmware status.');
+      return null;
+    }
+    if (!response.ok) throw new Error('Status request failed');
+    return (await response.json()) as OtaStatus;
   } catch {
+    otaStat(
+      'Unable to reach the bridge. Reconnecting to check firmware status…',
+    );
     return null;
   }
 }
 
-// Poll while a check/update is in flight. During an apply the bridge reboots,
-// so a failed fetch after "updating" means the new image is coming up.
+// Keep observing idle status too: updates may start on another page or console.
+// A lost connection does not prove that installation succeeded or rebooted.
 function pollOta(): void {
-  if (otaPolling) {
-    return;
-  }
+  if (otaPolling) return;
+  clearTimeout(otaTimer);
   otaPolling = true;
-  const tick = async (): Promise<void> => {
+  void (async () => {
     const s = await fetchOta();
-    if (s === null) {
-      otaStat('Bridge is rebooting into the new firmware. Reconnect shortly.');
-      otaPolling = false;
-      return;
+    if (s) renderOta(s);
+    otaPolling = false;
+    otaTimer = setTimeout(pollOta, otaBusy || !s ? 1500 : 10000);
+  })();
+}
+
+async function requestOta(action: 'check' | 'apply'): Promise<void> {
+  if (otaBusy || manualUpdate.isBusy()) return;
+  otaBusy = true;
+  (el('otaCheckBtn') as HTMLButtonElement).disabled = true;
+  (el('otaApplyBtn') as HTMLButtonElement).disabled = true;
+  otaStat(
+    '<span class=spin></span>' +
+      (action === 'apply' ? 'Starting update…' : 'Checking for updates…'),
+  );
+  try {
+    const response = await fetch('/ota/' + action, {
+      method: 'POST',
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!response.ok) {
+      otaBusy = false;
+      otaStat(
+        response.status === 401
+          ? 'Session expired. Reload and sign in to update firmware.'
+          : 'Firmware request was rejected. Checking status…',
+      );
     }
-    renderOta(s);
-    if (s.phase === 'checking' || s.phase === 'updating') {
-      setTimeout(() => void tick(), 1500);
-    } else {
-      otaPolling = false;
-    }
-  };
-  void tick();
+  } catch {
+    otaStat(
+      'Connection lost. Checking whether the firmware operation started…',
+    );
+  }
+  pollOta();
 }
 
 function otaCheck(): void {
-  otaStat('<span class=spin></span>Checking for updates…');
-  void fetch('/ota/check', { method: 'POST' }).catch(() => {});
-  setTimeout(pollOta, 800);
+  void requestOta('check');
 }
 
 function otaApply(): void {
-  if (!confirm('Install the new firmware and reboot the bridge?')) {
-    return;
-  }
-  otaStat('<span class=spin></span>Starting update…');
-  void fetch('/ota/apply', { method: 'POST' }).catch(() => {});
-  setTimeout(pollOta, 800);
+  if (confirm('Install the new firmware and reboot the bridge?'))
+    void requestOta('apply');
 }
 
 async function loadOta(): Promise<void> {
-  const s = await fetchOta();
-  if (s) {
-    renderOta(s);
-    if (s.phase === 'checking' || s.phase === 'updating') {
-      pollOta();
-    }
-  }
+  pollOta();
 }
 
 // ---- devices tab ------------------------------------------------------------
@@ -870,6 +896,7 @@ function renderRoute(): void {
     if (tab.dataset.view) el(tab.dataset.view).hidden = tab !== active;
   });
   updateDevPolling();
+  if (location.pathname === '/firmware') pollOta();
 }
 tabs.forEach((tab) => {
   tab.addEventListener('click', (event) => {
@@ -889,7 +916,10 @@ tabs.forEach((tab) => {
 });
 window.addEventListener('popstate', renderRoute);
 renderRoute();
-document.addEventListener('visibilitychange', updateDevPolling);
+document.addEventListener('visibilitychange', () => {
+  updateDevPolling();
+  if (!document.hidden) pollOta();
+});
 
 el('signOut').addEventListener('click', () => {
   // The server drops the session and expires the cookie; the reload then

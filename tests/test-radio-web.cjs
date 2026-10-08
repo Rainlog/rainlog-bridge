@@ -6,6 +6,7 @@ const http = require("http"),
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "playwright");
 (async () => {
   let manualUploads = 0, rejectManual = true;
+  let otaPhase = "uptodate", otaRunning = "1.0.0", otaFailures = 0;
   const firmware = Buffer.alloc(1024);
   firmware[0] = 0xe9; firmware[23] = 1;
   firmware.writeUInt32LE(0xabcd5432, 32);
@@ -70,19 +71,25 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "playwright");
           },
         ]),
       );
-    if (req.url === "/ota/status")
+    if (req.url === "/ota/apply") {
+      setTimeout(() => { otaPhase = "updating"; }, 2200);
+      return res.end(JSON.stringify({s: "updating"}));
+    }
+    if (req.url === "/ota/status") {
+      if (otaFailures > 0) { otaFailures--; res.statusCode = 503; return res.end("unavailable"); }
       return res.end(
         JSON.stringify({
           board: "esp32-c6fh8-lcd-1.47",
           max_image_size: 0x300000,
-          phase: "uptodate",
-          running: "1.0.0",
-          latest: "1.0.0",
-          available: false,
-          progress: 0,
+          phase: otaPhase,
+          running: otaRunning,
+          latest: "1.0.1",
+          available: otaPhase === "available" || otaPhase === "updating",
+          progress: 32,
           error: "",
         }),
       );
+    }
     if (req.url === '/ota/upload') {
       assert.equal(req.headers['x-rainlog-ota'], '1');
       assert.equal(req.headers['content-type'], 'application/octet-stream');
@@ -319,6 +326,17 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "playwright");
   assert.equal(await page.locator("#radioSetup").count(), 0);
   assert.equal(await page.locator("#wifiInterceptionEnabled").count(), 0);
   await page.getByRole("link", {name: 'Firmware', exact: true}).click();
+  otaPhase = "available";
+  await page.getByText('Update available: v1.0.0 → v1.0.1', {exact:true}).waitFor();
+  page.on('dialog', dialog => dialog.accept());
+  await page.locator('#otaApplyBtn').click();
+  await page.getByText('Updating to v1.0.1… 32%', {exact:true}).waitFor();
+  assert.equal(await page.locator('#otaCheckBtn').isDisabled(), true);
+  otaFailures = 1;
+  await page.getByText('Unable to reach the bridge. Reconnecting to check firmware status…', {exact:true}).waitFor();
+  otaPhase = "uptodate"; otaRunning = "1.0.1";
+  await page.getByText('Up to date (v1.0.1).', {exact:true}).waitFor();
+  assert.equal(await page.locator('#otaCheckBtn').isEnabled(), true);
   await page.locator('#manualUpdate summary').click();
   await page.locator('#firmwareFile').setInputFiles({name: 'short.bin', mimeType: 'application/octet-stream', buffer: Buffer.alloc(20)});
   assert.equal(await page.locator('#firmwareInstall').isDisabled(), true);
@@ -333,6 +351,8 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "playwright");
   await page.getByRole('button', {name: 'Upload & install', exact: true}).click();
   await page.getByText('Image verification failed; current firmware retained', {exact: true}).waitFor();
   assert.equal(await page.locator('#firmwareInstall').isEnabled(), true);
+  await page.waitForFunction(() => !document.getElementById('otaCheckBtn').disabled);
+  assert.equal(await page.locator('#otaApplyBtn').isEnabled(), true);
   rejectManual = false;
   await page.getByRole('button', {name: 'Upload & install', exact: true}).click();
   await page.getByText('Firmware verified. Rebooting; reconnect to the bridge shortly.', {exact: true}).waitFor();

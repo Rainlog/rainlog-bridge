@@ -1,6 +1,6 @@
 // Manual app-image upload. The firmware repeats all identity checks and verifies
 // the complete image before selecting the inactive OTA slot for boot.
-export function createManualUpdate() {
+export function createManualUpdate(refreshStatus: () => void) {
   const fileInput = document.getElementById('firmwareFile') as HTMLInputElement;
   const install = document.getElementById(
     'firmwareInstall',
@@ -17,7 +17,7 @@ export function createManualUpdate() {
 
   function controls(): void {
     install.disabled = !selected || busy || serverBusy;
-    fileInput.disabled = busy;
+    fileInput.disabled = busy || serverBusy;
   }
   async function inspect(): Promise<void> {
     selected = null;
@@ -107,9 +107,7 @@ export function createManualUpdate() {
       request = null;
       busy = rebooting;
       controls();
-      if (!rebooting)
-        (document.getElementById('otaCheckBtn') as HTMLButtonElement).disabled =
-          false;
+      if (!rebooting) refreshStatus();
     };
     xhr.onload = () => {
       let result: { ok?: boolean; error?: string } = {};
@@ -134,6 +132,7 @@ export function createManualUpdate() {
     xhr.send(selected);
   });
   return {
+    isBusy: (): boolean => busy,
     setStatus(status: {
       board?: string;
       max_image_size?: number;

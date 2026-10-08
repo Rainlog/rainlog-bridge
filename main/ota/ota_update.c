@@ -261,6 +261,7 @@ static void do_check(void) {
 }
 
 static void do_apply(void) {
+  set_phase(PHASE_CHECKING);
   // Re-fetch the manifest so we apply the freshest image URL and re-confirm
   // it is actually newer than what is running.
   char latest[24], url[160], sha[65];
