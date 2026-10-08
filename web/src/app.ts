@@ -37,7 +37,8 @@ interface BridgeConfig {
   ap_ip: string;
   wu_map: WuMapping[];
   radio_enabled?: boolean;
-  bridge_wifi_auto_off: boolean;
+  bridge_wifi_auto_off?: boolean;
+  bridge_wifi_required?: boolean;
   bridge_wifi_active: boolean;
   radio_map?: Parameters<
     ReturnType<typeof createRadio>['load']
@@ -202,7 +203,24 @@ function bridgePwError(): string | null {
   return null;
 }
 
+let wifiRequired = false;
+function updateWifiIdleOption(): void {
+  if (RADIO_MHZ === 0) return;
+  const option = el('bridgeWifiAutoOff') as HTMLInputElement;
+  const configured =
+    wifiRequired ||
+    wuRows().some(
+      (row) =>
+        /^[0-9a-f]{2}(:[0-9a-f]{2}){5}$/i.test(rowDevice(row)) &&
+        Boolean(row.querySelector<HTMLInputElement>('.wu')!.value.trim()),
+    );
+  option.disabled = configured;
+  if (configured) option.checked = false;
+  el('wifiIdleRequired').hidden = !configured;
+}
+
 function revalidate(): void {
+  updateWifiIdleOption();
   const he = homePwError();
   const be = bridgePwError();
   el('sta_pass_err').textContent =
@@ -288,6 +306,7 @@ function attachWuUploader(card: HTMLElement, gauge: () => number): void {
   refreshUploaderButtons();
 }
 function refreshUploaderButtons(): void {
+  updateWifiIdleOption();
   document.querySelectorAll<HTMLElement>('.device-card').forEach((card) => {
     const gauge = uploaderGauges.get(card)?.() ?? 0;
     const device = cardDevice(card);
@@ -752,6 +771,10 @@ async function pollDevices(): Promise<void> {
     const clients = (await (await fetch('/clients')).json()) as ApClient[];
     const gauges = clients.map((client) => client.gauge_id ?? 0);
     radio?.setWifiGauges(gauges);
+    if (RADIO_MHZ !== 0 && clients.some((client) => client.rx > 0)) {
+      wifiRequired = true;
+      updateWifiIdleOption();
+    }
     renderDevices(clients);
   } catch {
     /* keep the last rendered list on a blip */
@@ -805,8 +828,11 @@ async function loadConfig(): Promise<void> {
   }
   if (cfg) {
     radio?.load(cfg);
-    (el('bridgeWifiAutoOff') as HTMLInputElement).checked =
-      cfg.bridge_wifi_auto_off;
+    if (RADIO_MHZ !== 0) {
+      wifiRequired ||= cfg.bridge_wifi_required ?? false;
+      (el('bridgeWifiAutoOff') as HTMLInputElement).checked =
+        cfg.bridge_wifi_auto_off ?? true;
+    }
     apPassDefault = cfg.ap_pass_default;
     apSsid = cfg.ap_ssid;
     apIp = cfg.ap_ip;

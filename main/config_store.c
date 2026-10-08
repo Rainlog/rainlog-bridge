@@ -21,6 +21,10 @@ static const char *TAG = "config";
 #define NS "bridge_cfg"
 
 static bridge_config_t s_cfg;
+#if RAINLOG_RADIO
+static volatile bool s_wifi_uploader_seen;
+static volatile bool s_wifi_uploader_persisted;
+#endif
 
 #define STRING_FIELD(name)                 \
   {#name, offsetof(bridge_config_t, name), \
@@ -30,8 +34,8 @@ static bridge_config_t s_cfg;
 const config_field_t config_fields[] = {
 #if RAINLOG_RADIO
     NUMBER_FIELD(radio_enabled, 1),
-#endif
     NUMBER_FIELD(bridge_wifi_auto_off, 1),
+#endif
     STRING_FIELD(sta_ssid),
     STRING_FIELD(sta_pass),
     STRING_FIELD(ap_ssid),
@@ -50,9 +54,9 @@ const size_t config_field_count =
 // NVS keys are limited to 15 bytes, independent of descriptive API names.
 static const char *field_keys[] = {
 #if RAINLOG_RADIO
-    "radio_enabled",
+    "radio_enabled", "ap_auto_off",
 #endif
-    "ap_auto_off",   "sta_ssid", "sta_pass",  "ap_ssid",  "ap_pass",
+    "sta_ssid",      "sta_pass", "ap_ssid",  "ap_pass",
     "rl_host",       "wu_host",  "wu_path",   "ota_host", "ota_path",
     "disp_full",     "disp_dim", "disp_idle", "led_level"};
 _Static_assert(sizeof(field_keys) / sizeof(field_keys[0]) ==
@@ -153,8 +157,10 @@ void config_load(void) {
   memset(s_cfg.wu_map, 0, sizeof(s_cfg.wu_map));
   s_cfg.wu_map_count = 0;
   s_cfg.provisioned = false;
-  s_cfg.bridge_wifi_auto_off = 1;
 #if RAINLOG_RADIO
+  s_cfg.bridge_wifi_auto_off = 1;
+  s_wifi_uploader_seen = false;
+  s_wifi_uploader_persisted = false;
   s_cfg.radio_enabled = 1;
   memset(s_cfg.radio_map, 0, sizeof(s_cfg.radio_map));
   s_cfg.radio_map_count = 0;
@@ -165,6 +171,12 @@ void config_load(void) {
     ESP_LOGI(TAG, "no saved config; using compile-time defaults");
     return;
   }
+#if RAINLOG_RADIO
+  uint8_t wifi_uploader = 0;
+  nvs_get_u8(h, "wifi_uploader", &wifi_uploader);
+  s_wifi_uploader_seen = wifi_uploader != 0;
+  s_wifi_uploader_persisted = s_wifi_uploader_seen;
+#endif
   for (size_t i = 0; i < config_field_count; i++) {
     const config_field_t *f = &config_fields[i];
     void *value = (char *)&s_cfg + f->offset;
@@ -352,4 +364,47 @@ bool config_gauge_uses_radio(uint32_t gauge_id) {
   (void)gauge_id;
 #endif
   return false;
+}
+
+// C6 has no radio alternative. On LILYGO, sleeping the AP would strand a
+// configured console after a temporary disconnect, so mappings and previously
+// captured Wi-Fi weather uploaders override the user's idle preference.
+bool config_bridge_wifi_required(const bridge_config_t *cfg) {
+#if RAINLOG_RADIO
+  if (s_wifi_uploader_seen) return true;
+  for (unsigned i = 0; i < cfg->wu_map_count; i++) {
+    const wu_mapping_t *m = &cfg->wu_map[i];
+    if (m->device[0]) {
+      if (strncmp(m->device, "radio:", 6)) return true;
+    } else {
+      bool radio = false;
+      for (unsigned j = 0; j < cfg->radio_map_count; j++)
+        if (cfg->radio_map[j].gauge_id == m->gauge_id) radio = true;
+      if (!radio) return true;
+    }
+  }
+  return false;
+#else
+  (void)cfg;
+  return true;
+#endif
+}
+
+void config_note_wifi_uploader(void) {
+#if RAINLOG_RADIO
+  if (s_wifi_uploader_persisted) return;
+  // One small NVS write when a Wi-Fi weather uploader is first recognized,
+  // not on each upload. Factory reset clears this with the other configuration.
+  nvs_handle_t h;
+  esp_err_t err = nvs_open(NS, NVS_READWRITE, &h);
+  if (err == ESP_OK) {
+    err = nvs_set_u8(h, "wifi_uploader", 1);
+    if (err == ESP_OK) err = nvs_commit(h);
+    nvs_close(h);
+  }
+  // Protect the console in this boot even if persistence failed.
+  s_wifi_uploader_seen = true;
+  s_wifi_uploader_persisted = err == ESP_OK;
+  if (err != ESP_OK) ESP_LOGW(TAG, "could not persist Wi-Fi uploader: %d", err);
+#endif
 }

@@ -25,8 +25,11 @@
 <div class=row><button type=button id=testBtn class=mini>Test connection</button></div>
 <div id=tstat></div>
 <h3>Bridge Wi-Fi</h3>
+<!-- RADIO_BEGIN -->
 <label class=check><input type=checkbox name=bridge_wifi_auto_off id=bridgeWifiAutoOff>Turn off Bridge Wi-Fi after 5 idle minutes</label>
 <p class=hint>Stays on while devices are connected, during setup, or if Home Wi-Fi is down. Restart the bridge, press its setup button, or open this page through Home Wi-Fi to wake it. Home Wi-Fi and weather radio keep working.</p>
+<p id=wifiIdleRequired class=hint hidden>Idle shutdown is disabled because a Wi-Fi weather uploader is configured. Bridge Wi-Fi must stay available for it to reconnect.</p>
+<!-- RADIO_END -->
 <fieldset id=bridgeWifiFields style="border:0;padding:0;margin:0;min-width:0">
 <label>Network name (this device)</label>
 <input name=ap_ssid placeholder="Network name">

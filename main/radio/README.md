@@ -86,7 +86,10 @@ list and update the mapping after replacing a sensor battery.
 Bridge Wi-Fi starts on every boot. The “Turn off Bridge Wi-Fi after 5 idle
 minutes” setting defaults on and stops the SoftAP after 300 seconds with no
 connected clients or local activity. Connected consoles keep it awake between
-uploads. Setup and a missing Home Wi-Fi uplink keep it available. A button
+uploads. Configured Wi-Fi WU mappings and previously captured Wi-Fi weather
+uploaders disable idle shutdown even while disconnected, so consoles can
+reconnect. The learned uploader flag survives reboot until factory reset;
+merely joining with a phone does not set it. Setup and a missing Home Wi-Fi uplink keep it available. A button
 press, restart, or opening the setup page through Home Wi-Fi wakes it again.
 Home Wi-Fi, radio reception and LAN setup access continue while it sleeps;
 the Bridge Wi-Fi password remains the setup password. Uncheck the setting to

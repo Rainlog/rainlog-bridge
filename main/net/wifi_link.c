@@ -374,6 +374,9 @@ bool wifi_link_ap_enabled(void) {
 }
 
 void wifi_link_poll(void) {
+#if RAINLOG_RADIO
+  // C6 has no weather radio: its only reception path is Bridge Wi-Fi.
+  // LILYGO may sleep its AP only when no configured Wi-Fi uploader needs it.
   static int64_t last_activity;
   const bridge_config_t *cfg = config_get();
   int64_t now = esp_timer_get_time();
@@ -381,8 +384,9 @@ void wifi_link_poll(void) {
   if (user_activity > last_activity) last_activity = user_activity;
   bool clients = s_ap_sta_count > 0;
   if (!cfg->provisioned || !s_sta_has_ip || clients) last_activity = now;
-  bool awake = wifi_idle_keep_awake(cfg->bridge_wifi_auto_off, cfg->provisioned,
-                                    s_sta_has_ip, clients, now, last_activity);
+  bool auto_off = cfg->bridge_wifi_auto_off && !config_bridge_wifi_required(cfg);
+  bool awake = wifi_idle_keep_awake(auto_off, cfg->provisioned, s_sta_has_ip,
+                                   clients, now, last_activity);
   if (awake == wifi_link_ap_enabled()) return;
   esp_err_t err = esp_wifi_set_mode(awake ? WIFI_MODE_APSTA : WIFI_MODE_STA);
   if (err != ESP_OK) {
@@ -392,4 +396,5 @@ void wifi_link_poll(void) {
   if (awake && s_sta_has_ip) esp_netif_napt_enable(s_ap_netif);
   ESP_LOGI(TAG, "Bridge Wi-Fi %s",
            awake ? "awake" : "sleeping after 5 idle minutes");
+#endif
 }

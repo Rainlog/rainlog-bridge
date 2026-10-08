@@ -1,5 +1,6 @@
 #include "ap_clients.h"
 #include "ap_client_gauges.h"
+#include "config_store.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -185,7 +186,9 @@ void ap_clients_note_upload(uint32_t ip4, uint32_t gauge_id) {
     e->rx_count++;
     if (gauge_id) e->gauge_id = gauge_id;
   }
+  bool uploader = e != NULL;
   xSemaphoreGive(s_lock);
+  if (uploader) config_note_wifi_uploader();
 }
 
 void ap_clients_note_forwarded(uint32_t ip4) {

@@ -15,6 +15,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "playwright");
   firmware.write('RLOGOTA1', 288);
   firmware.write('esp32-c6fh8-lcd-1.47', 296);
   let wifiActive = true;
+  let wifiRx = 1, wifiConnected = true, wifiRemembered = false;
   let radioMappings = [];
   let wuMappings = [];
   let radioName = "";
@@ -33,6 +34,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "playwright");
           wu_map: wuMappings,
           radio_enabled: true,
           bridge_wifi_auto_off: true,
+          bridge_wifi_required: wifiRemembered || wifiRx > 0 || wuMappings.some(m => m.device && !m.device.startsWith("radio:")),
           bridge_wifi_active: radioPage ? wifiActive : true,
           radio_map: radioMappings,
         }),
@@ -59,11 +61,11 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "playwright");
             hostname: "Weather console",
             vendor: "AcuRite",
             ip: "10.41.0.2",
-            connected: true,
+            connected: wifiConnected,
             rssi: -50,
             age_s: 1,
             you: false,
-            rx: 1,
+            rx: wifiRx,
             rl: 1,
             wu: 0,
             err: 0,
@@ -158,11 +160,11 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "playwright");
   await page.waitForFunction(() => document.querySelector('[name=ap_ssid]').value !== '');
   assert.equal(await page.locator('[name=ap_ssid]').isEnabled(), true);
   assert.equal(await page.locator('[name=ap_pass]').isEnabled(), true);
-  assert.equal(await page.locator('#bridgeWifiAutoOff').isChecked(), true);
+  assert.equal(await page.locator('#bridgeWifiAutoOff').isChecked(), false);
   await page.locator('#radioEnabled').uncheck();
-  assert.equal(await page.locator('#bridgeWifiAutoOff').isEnabled(), true);
+  assert.equal(await page.locator('#bridgeWifiAutoOff').isDisabled(), true);
   await page.locator('#radioEnabled').check();
-  await page.locator('#bridgeWifiAutoOff').uncheck();
+  assert.equal(await page.locator('#wifiIdleRequired').isVisible(), true);
   assert.equal(await page.locator('#radioSetup button').count(), 0);
   assert.equal(await page.locator('#radioSetup #radioRows').count(), 0);
   await page.locator('#radioStatus').getByText('Radio reception enabled. 2 devices seen.', {exact: true}).waitFor();
@@ -309,6 +311,24 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "playwright");
   assert.equal(await page.locator("#wifiDevices").isVisible(), true);
   assert.equal(await page.getByText('Other WU Uploaders', {exact: true}).count(), 0);
   assert.equal(await page.locator('#addBtn').count(), 0);
+  // A radio-only mapping permits idle shutdown; an offline configured Wi-Fi
+  // uploader or the persisted learned-uploader flag must disable it.
+  wifiRx = 0; wifiGauge = 0; wifiConnected = false;
+  wuMappings = [{device:'radio:0:4:0', gauge_id:123, wu_id:'KRADIO', wu_key:'key'}];
+  await page.goto(url + '/setup');
+  await page.waitForFunction(() => document.querySelector('[name=ap_ssid]').value !== '');
+  assert.equal(await page.locator('#bridgeWifiAutoOff').isEnabled(), true);
+  assert.equal(await page.locator('#bridgeWifiAutoOff').isChecked(), true);
+  wuMappings = [{device:'01:02:03:04:05:06', gauge_id:0, wu_id:'KWIFI', wu_key:'key'}];
+  await page.reload();
+  await page.waitForFunction(() => document.querySelector('[name=ap_ssid]').value !== '');
+  assert.equal(await page.locator('#bridgeWifiAutoOff').isDisabled(), true);
+  assert.equal(await page.locator('#bridgeWifiAutoOff').isChecked(), false);
+  wuMappings = []; wifiRemembered = true;
+  await page.reload();
+  await page.waitForFunction(() => document.querySelector('[name=ap_ssid]').value !== '');
+  assert.equal(await page.locator('#bridgeWifiAutoOff').isDisabled(), true);
+  wifiRemembered = false; wifiRx = 1; wifiConnected = true;
   radioPage = false;
   wifiGauge = 0;
   wuMappings = [{device:'01:02:03:04:05:06', gauge_id:0, wu_id:'KWIFIONLY', wu_key:'wifi-only-key'}];
@@ -321,7 +341,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "playwright");
   assert.equal(await page.locator('.wifi-card').getByRole('button', {name:'Add WU Uploader', exact:true}).isEnabled(), true);
 
   assert.equal(await page.locator("#radioSetup").count(), 0);
-  assert.equal(await page.locator("#bridgeWifiAutoOff").count(), 1);
+  assert.equal(await page.locator("#bridgeWifiAutoOff").count(), 0);
   await page.getByRole("link", {name: 'Firmware', exact: true}).click();
   otaPhase = "available";
   await page.getByText('Update available: v1.0.0 → v1.0.1', {exact:true}).waitFor();

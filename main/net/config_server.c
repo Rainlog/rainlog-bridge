@@ -256,10 +256,9 @@ char *config_server_config_json(void) {
   int o = snprintf(json, PAGE_MAX,
                    "{\"sta_ssid\":\"%s\",\"ap_ssid\":\"%s\","
                    "\"ap_pass_default\":%s,\"ap_ip\":\"%s\","
-                   "\"bridge_wifi_auto_off\":%s,\"bridge_wifi_active\":%s,\"wu_map\":[",
+                   "\"bridge_wifi_active\":%s,\"wu_map\":[",
                    sta_ssid, ap_ssid,
                    ap_pass_is_default(cfg->ap_pass) ? "true" : "false", ap_ip,
-                   cfg->bridge_wifi_auto_off ? "true" : "false",
                    wifi_link_ap_enabled() ? "true" : "false");
   for (uint8_t i = 0; i < cfg->wu_map_count && o > 0 && o < PAGE_MAX; i++) {
     char device[sizeof(cfg->wu_map[i].device) * 6];
@@ -277,8 +276,11 @@ char *config_server_config_json(void) {
 #if RAINLOG_RADIO
   if (o > 0 && o < PAGE_MAX)
     o += snprintf(json + o, PAGE_MAX - o,
-                  "],\"radio_enabled\":%s,\"radio_map\":[",
-                  cfg->radio_enabled ? "true" : "false");
+                  "],\"radio_enabled\":%s,\"bridge_wifi_auto_off\":%s,"
+                  "\"bridge_wifi_required\":%s,\"radio_map\":[",
+                  cfg->radio_enabled ? "true" : "false",
+                  cfg->bridge_wifi_auto_off ? "true" : "false",
+                  config_bridge_wifi_required(cfg) ? "true" : "false");
   for (unsigned i = 0; i < cfg->radio_map_count && o > 0 && o < PAGE_MAX; i++) {
     const radio_mapping_t *m = &cfg->radio_map[i];
     char name[198];
@@ -559,11 +561,12 @@ esp_err_t config_server_save_form(const char *body, const char **error) {
     n++;
   }
   cfg.wu_map_count = n;
+
+#if RAINLOG_RADIO
   cfg.bridge_wifi_auto_off =
       http_util_form_get(body, "bridge_wifi_auto_off", tmp, sizeof(tmp)) ? 1
                                                                          : 0;
 
-#if RAINLOG_RADIO
   // Radio fields are only present on radio boards.
   if (http_util_form_get(body, "radio_form", tmp, sizeof(tmp))) {
     cfg.radio_enabled =

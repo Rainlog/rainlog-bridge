@@ -95,11 +95,17 @@ To upload to Weather Underground, choose **Add WU Uploader** on the device card 
 
 ### If something is wrong
 
-Bridge Wi-Fi starts on boot. Enable “Turn off Bridge Wi-Fi after 5 idle minutes”
-(the default) to stop its network after 300 seconds with no connected devices or
-local activity. Connected weather consoles, initial setup, and a missing Home
-Wi-Fi connection keep it awake. Restart, press the setup button, or open the
-setup page through Home Wi-Fi to wake it. Uncheck the setting to leave it on.
+Bridge Wi-Fi always stays on for C6: it has no weather radio, so Wi-Fi is its
+only weather reception path. LILYGO can instead receive weather by radio and
+therefore offers “Turn off Bridge Wi-Fi after 5 idle minutes” (enabled by
+default). It sleeps after 300 seconds without connected devices or local
+activity, unless a Wi-Fi weather uploader is configured. Saved Wi-Fi WU
+mappings and a previously captured Wi-Fi weather uploader keep the AP on even
+if the console is offline: otherwise it could not reconnect. The learned
+uploader flag survives reboot and is cleared by factory reset; simply joining
+with a setup phone does not set it. Setup and a missing Home Wi-Fi uplink keep
+the AP awake. Restart, press the setup button, or open setup through Home Wi-Fi
+to wake it. Uncheck the setting to leave it on continuously.
 
 The C6 LCD shows home and bridge Wi-Fi details, 24-hour and lifetime upload totals, and per-device received/sent counters. The LILYGO OLED uses a compact 4x6 font to show home/bridge Wi-Fi details, firmware version, radio reception/device count, 24-hour/lifetime upload counts and device received/sent counters. Queue and firmware-update notices take priority over optional OLED rows. Detailed inventory and error reasons are on the web page's Devices tab.
 
