@@ -7,6 +7,7 @@
 
 #include "sdkconfig.h"
 
+#define BOARD_FONT_4X6 406
 #define BOARD_FONT_6X10 610
 #define BOARD_FONT_8X13 813
 
@@ -14,10 +15,13 @@
 // LILYGO T3 LoRa32 V1.6.1, 433 MHz SX1278 variant.
 #define BOARD_ID "lilygo-t3-v1.6.1-sx1278"
 #define BOARD_DISPLAY_SSD1306 1
-#define BOARD_DISPLAY_W 128
-#define BOARD_DISPLAY_H 64
+#define BOARD_DISPLAY_NATIVE_W 128
+#define BOARD_DISPLAY_NATIVE_H 64
+// Portrait coordinates, rotated clockwise into the SSD1306 page buffer.
+#define BOARD_DISPLAY_W 64
+#define BOARD_DISPLAY_H 128
 #ifndef BOARD_DISPLAY_FONT
-#define BOARD_DISPLAY_FONT BOARD_FONT_6X10
+#define BOARD_DISPLAY_FONT BOARD_FONT_4X6
 #endif
 #define BOARD_I2C_SDA_GPIO 21
 #define BOARD_I2C_SCL_GPIO 22
@@ -66,8 +70,8 @@
 #define BOARD_SD_CS_GPIO 4
 
 // BOOT button (active low, has an external pull-up). The only user input on
-// this non-touch board; used as the interaction signal (wake the backlight) and
-// later for hold-to-provision.
+// this non-touch board; a press wakes the display and a sustained hold
+// starts the factory-reset countdown.
 #define BOARD_BOOT_BUTTON_GPIO 9
 
 #else

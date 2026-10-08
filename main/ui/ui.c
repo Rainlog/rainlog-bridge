@@ -8,12 +8,14 @@
 #include "button.h"
 #include "config_store.h"
 #include "display.h"
+#include "esp_app_desc.h"
 #include "esp_log.h"
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "forwarder.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "ota_update.h"
 #include "screen_reset.h"
 #include "screen_setup.h"
 #include "screen_status.h"
@@ -28,24 +30,160 @@ static const char *TAG = "ui";
 
 #if BOARD_DISPLAY_SSD1306
 #include "oled_logo.h"
-#define OLED_TEXT_X (OLED_LOGO_W + 1 + GLYPH)
+#include "radio/radio.h"
+#define OLED_TEXT_X 2
+#define OLED_TEXT_W (DISPLAY_W - 2 * OLED_TEXT_X)
+#define OLED_VERSION_RIGHT 7  // Side margin plus five pixels of extra inset.
+#define OLED_CONTENT_Y (15 + GLYPH_H + 4)
 #if BOARD_DISPLAY_FONT == BOARD_FONT_6X10
 // Regular 6x10 glyphs have a blank sixth column. The final cell can omit it.
-#define OLED_COLUMNS ((DISPLAY_W - OLED_TEXT_X + 1) / GLYPH)
+#define OLED_COLUMNS ((OLED_TEXT_W + 1) / GLYPH)
 #else
-#define OLED_COLUMNS ((DISPLAY_W - OLED_TEXT_X) / GLYPH)
+#define OLED_COLUMNS (OLED_TEXT_W / GLYPH)
 #endif
-#define OLED_ROWS (DISPLAY_H / GLYPH_H)
-#define OLED_ROW_HEIGHT (DISPLAY_H / OLED_ROWS)
+#define OLED_ROW_HEIGHT (GLYPH_H + 1)
+#define OLED_SECTION_GAP 3  // C6's 8-pixel section gap scaled to this panel.
+// Reserve underline padding for three headings and two section gaps.
+#define OLED_ROWS \
+  ((DISPLAY_H - OLED_CONTENT_Y - 9 - 2 * OLED_SECTION_GAP + 1) / OLED_ROW_HEIGHT)
+static int oled_section_offset;
 
 static void oled_line(int row, const char *text) {
+  if (row < 0 || row >= OLED_ROWS) return;
   char line[OLED_COLUMNS + 1];
   snprintf(line, sizeof(line), "%s", text);
-  display_text(OLED_TEXT_X, row * OLED_ROW_HEIGHT, 1, COLOR_WHITE, line);
+  display_text(OLED_TEXT_X, OLED_CONTENT_Y + row * OLED_ROW_HEIGHT + oled_section_offset, 1, COLOR_WHITE, line);
 }
 
+#if BOARD_DISPLAY_FONT == BOARD_FONT_4X6
+static int oled_section(int row, const char *label) {
+  oled_line(row, label);
+  int y = OLED_CONTENT_Y + row * OLED_ROW_HEIGHT + oled_section_offset + GLYPH_H + 1;
+  display_fill_rect(OLED_TEXT_X, y, OLED_TEXT_W, 1, COLOR_WHITE);
+  oled_section_offset += 3;
+  return row + 1;
+}
+
+// C6 status sections condensed into the portrait OLED's 16-column rows.
+static void oled_status_dense(void) {
+  const bridge_config_t *cfg = config_get();
+  char line[80], ssid[33];
+  int rssi = 0, row = 0;
+  int pending = forwarder_pending_count();
+  bool update = ota_update_available();
+  int end = OLED_ROWS - (pending ? 1 : 0) - (update ? 1 : 0);
+  bool associated = wifi_link_sta_ap_info(ssid, sizeof(ssid), &rssi);
+  row = oled_section(row, "Home Wi-Fi");
+  snprintf(line, sizeof(line), "%s", associated ? ssid : cfg->sta_ssid);
+  oled_line(row++, line);
+  if (wifi_link_sta_has_ip()) {
+    char ip[16];
+    wifi_link_sta_ip_str(ip, sizeof(ip));
+    snprintf(line, sizeof(line), "%s", ip);
+  } else
+    snprintf(line, sizeof(line), "Wi-Fi offline");
+  oled_line(row++, line);
+  oled_section_offset += OLED_SECTION_GAP;
+  row = oled_section(row, "Bridge Wi-Fi");
+  if (wifi_link_ap_enabled()) {
+    snprintf(line, sizeof(line), "%s", cfg->ap_ssid);
+    oled_line(row++, line);
+    char ip[16];
+    wifi_link_ap_ip_str(ip, sizeof(ip));
+    snprintf(line, sizeof(line), "%s", ip);
+    oled_line(row++, line);
+    snprintf(line, sizeof(line), "%d devices", wifi_link_ap_station_count());
+    oled_line(row++, line);
+  } else
+    oled_line(row++, "Disabled");
+
+  radio_status_t radio;
+  radio_status(&radio);
+  radio_sensor_t sensors[RADIO_SENSORS_MAX];
+  size_t count = radio_sensors(sensors, RADIO_SENSORS_MAX);
+  oled_section_offset += OLED_SECTION_GAP;
+  row = oled_section(row, "Forwarding");
+  if (!radio.available || radio.error)
+    snprintf(line, sizeof(line), "Radio error");
+  else if (!radio.receiving)
+    snprintf(line, sizeof(line), "Radio off");
+  else
+    snprintf(line, sizeof(line), "%luMHz %u seen",
+             (unsigned long)(radio.frequency_hz / 1000000), (unsigned)count);
+  oled_line(row++, line);
+  snprintf(line, sizeof(line), "RL: %d 24h",
+           upload_stats_count_last_24h(UPLOAD_TARGET_RL));
+  oled_line(row++, line);
+  snprintf(line, sizeof(line), "%lu total",
+           (unsigned long)upload_stats_total(UPLOAD_TARGET_RL));
+  if (row + (cfg->wu_map_count ? 1 : 0) < end) oled_line(row++, line);
+  if (cfg->wu_map_count) {
+    snprintf(line, sizeof(line), "WU: %d 24h",
+             upload_stats_count_last_24h(UPLOAD_TARGET_WU));
+    oled_line(row++, line);
+    snprintf(line, sizeof(line), "%lu total",
+             (unsigned long)upload_stats_total(UPLOAD_TARGET_WU));
+    if (row < end) oled_line(row++, line);
+  }
+  if (row < end) oled_line(row++, "Device rcvd/sent");
+  ap_client_t clients[AP_CLIENTS_MAX];
+  int nc = ap_clients_snapshot(clients, AP_CLIENTS_MAX);
+  // As on the C6, recently uploading weather stations sort before idle clients.
+  for (int i = 1; i < nc; i++) {
+    ap_client_t current = clients[i];
+    int j = i;
+    while (j > 0 && clients[j - 1].last_upload_us < current.last_upload_us) {
+      clients[j] = clients[j - 1];
+      j--;
+    }
+    clients[j] = current;
+  }
+  for (int i = 0; i < nc && row < end; i++) {
+    const ap_client_t *client = &clients[i];
+    if (!client->last_upload_us && !client->connected) continue;
+    char fallback[16], counters[24];
+    snprintf(fallback, sizeof(fallback), IPSTR, IP2STR(&client->ip));
+    const char *name = *client->name       ? client->name
+                       : *client->hostname ? client->hostname
+                                           : fallback;
+    snprintf(counters, sizeof(counters), "%lu/%lu",
+             (unsigned long)client->rx_count, (unsigned long)client->fwd_count);
+    int width = OLED_COLUMNS - (int)strlen(counters) - 1;
+    snprintf(line, sizeof(line), "%.*s %s", width > 0 ? width : 0, name,
+             counters);
+    oled_line(row++, line);
+  }
+  for (size_t i = 0; i < count && row < end; i++) {
+    const weather_packet_t *p = &sensors[i].reading.packet;
+    snprintf(line, sizeof(line), "%s %u%c: %lurx",
+             p->model == WEATHER_LACROSSE_TX5U ? "TX5U" : "Iris", p->id,
+             p->channel ? p->channel : ' ', (unsigned long)sensors[i].packets);
+    oled_line(row++, line);
+  }
+  if (pending) {
+    snprintf(line, sizeof(line), "Retry queue: %d", pending);
+    oled_line(end++, line);
+  }
+  if (update) {
+    char latest[24];
+    ota_update_latest(latest, sizeof(latest));
+    snprintf(line, sizeof(line), "New FW: v%.12s", latest);
+    oled_line(end, line);
+  }
+}
+#endif
+
 static void oled_draw(uint32_t held) {
-  display_blit_mono(0, 0, OLED_LOGO_W, OLED_LOGO_H, oled_logo_pages);
+  oled_section_offset = 0;
+  // Undo the side-strip rotation of the approved logo artwork.
+  for (int y = 0; y < OLED_LOGO_H; y++)
+    for (int x = 0; x < OLED_LOGO_W; x++)
+      if (oled_logo_pages[(y / 8) * OLED_LOGO_W + x] & (1U << (y % 8)))
+        display_fill_rect(OLED_LOGO_H - 1 - y, x, 1, 1, COLOR_WHITE);
+  char version[OLED_COLUMNS + 1];
+  snprintf(version, sizeof(version), "v%.*s", OLED_COLUMNS - 1, esp_app_get_description()->version);
+  int version_x = DISPLAY_W - OLED_VERSION_RIGHT - (int)strlen(version) * GLYPH;
+  display_text(version_x, 15, 1, COLOR_WHITE, version);
   char line[80];
   if (held >= RESET_ARM_MS) {
     oled_line(0, "FACTORY RESET");
@@ -84,24 +222,72 @@ static void oled_draw(uint32_t held) {
     oled_line(3, line);
 #endif
   } else {
-    oled_line(0, "Rainlog Bridge");
-    snprintf(line, sizeof(line), "WiFi %s",
-             wifi_link_sta_has_ip() ? "connected" : "offline");
-    oled_line(1, line);
-    snprintf(line, sizeof(line), "RL %lu Q %d",
-             (unsigned long)upload_stats_total(UPLOAD_TARGET_RL),
-             forwarder_pending_count());
-    oled_line(2, line);
-#if OLED_ROWS >= 6
-    snprintf(line, sizeof(line), "WU %lu",
-             (unsigned long)upload_stats_total(UPLOAD_TARGET_WU));
-    oled_line(3, line);
-    snprintf(line, sizeof(line), "Wi-Fi clients: %d",
-             wifi_link_ap_station_count());
-    oled_line(4, line);
-    oled_line(5, forwarder_last_result());
+#if BOARD_DISPLAY_FONT == BOARD_FONT_4X6
+    oled_status_dense();
 #else
-    oled_line(3, forwarder_last_result());
+    int row = 0;
+    if (wifi_link_sta_has_ip())
+      wifi_link_sta_ip_str(line, sizeof(line));
+    else
+      snprintf(line, sizeof(line), "Wi-Fi offline");
+    oled_line(row++, line);
+
+    radio_status_t status;
+    radio_status(&status);
+    radio_sensor_t sensors[RADIO_SENSORS_MAX];
+    size_t count = radio_sensors(sensors, RADIO_SENSORS_MAX);
+    if (!status.available || status.error)
+      snprintf(line, sizeof(line), "Radio error");
+    else if (!status.receiving)
+      snprintf(line, sizeof(line), "Radio off");
+    else
+      snprintf(line, sizeof(line), "%luMHz: %u seen",
+               (unsigned long)(status.frequency_hz / 1000000), (unsigned)count);
+    oled_line(row++, line);
+
+    int pending = forwarder_pending_count();
+    bool update = ota_update_available();
+    int last = OLED_ROWS - ((pending || update) ? 1 : 0);
+    if ((cfg->radio_map_count || cfg->wifi_interception_enabled) &&
+        row < last) {
+      snprintf(line, sizeof(line), "RL 24h: %d",
+               upload_stats_count_last_24h(UPLOAD_TARGET_RL));
+      oled_line(row++, line);
+    }
+    if (cfg->wu_map_count && row < last) {
+      snprintf(line, sizeof(line), "WU 24h: %d",
+               upload_stats_count_last_24h(UPLOAD_TARGET_WU));
+      oled_line(row++, line);
+    }
+    if (!cfg->radio_map_count && !cfg->wu_map_count &&
+        !cfg->wifi_interception_enabled && row < last)
+      oled_line(row++, "No uploaders");
+    if (wifi_link_ap_enabled() && row < last) {
+      snprintf(line, sizeof(line), "WiFi: %d clients",
+               wifi_link_ap_station_count());
+      oled_line(row++, line);
+    }
+    if (status.receiving && count && row < last) {
+      int64_t newest = 0;
+      for (size_t i = 0; i < count; i++)
+        if (sensors[i].reading.received_us > newest)
+          newest = sensors[i].reading.received_us;
+      int64_t seconds = (esp_timer_get_time() - newest) / 1000000;
+      if (seconds < 60)
+        snprintf(line, sizeof(line), "Last RX: %llds", (long long)seconds);
+      else if (seconds < 3600)
+        snprintf(line, sizeof(line), "Last RX: %lldm",
+                 (long long)(seconds / 60));
+      else
+        snprintf(line, sizeof(line), "Last RX: %lldh",
+                 (long long)(seconds / 3600));
+      oled_line(row++, line);
+    }
+    if (pending) {
+      snprintf(line, sizeof(line), "Queued: %d", pending);
+      oled_line(OLED_ROWS - 1, line);
+    } else if (update)
+      oled_line(OLED_ROWS - 1, "FW update ready");
 #endif
   }
 }
@@ -122,8 +308,10 @@ static void draw_frame(void *context) {
     screen_reset_draw(frame->held);
   } else {
     ui_draw_header();
-    if (frame->provisioned) screen_status_draw();
-    else screen_setup_draw();
+    if (frame->provisioned)
+      screen_status_draw();
+    else
+      screen_setup_draw();
   }
 #endif
 }
@@ -173,8 +361,7 @@ void ui_start(void) {
     ESP_LOGW(TAG, "display init failed; running headless");
     return;
   }
-  // 4096 was enough before the status screen grew the ap_clients snapshot
-  // (~1.1KB of ap_client_t on this stack, plus the wifi sta lists inside
-  // ap_clients_snapshot).
+  // Includes transient radio inventory (OLED) or Wi-Fi station refresh
+  // (LCD). The persistent display snapshot and render buffer are off-stack.
   xTaskCreate(ui_task, "ui", 6144, NULL, 3, NULL);
 }

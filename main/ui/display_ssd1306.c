@@ -32,7 +32,7 @@ esp_err_t display_panel_init(void) {
   };
   ESP_RETURN_ON_ERROR(esp_lcd_new_panel_io_i2c(bus, &io_config, &s_io), TAG,
                       "OLED IO");
-  esp_lcd_panel_ssd1306_config_t oled = {.height = BOARD_DISPLAY_H};
+  esp_lcd_panel_ssd1306_config_t oled = {.height = BOARD_DISPLAY_NATIVE_H};
   esp_lcd_panel_dev_config_t config = {
       .reset_gpio_num = -1,
       .bits_per_pixel = 1,
@@ -52,8 +52,10 @@ esp_err_t display_panel_init(void) {
 esp_err_t display_panel_flush(const display_color_t *pixels, int y, int rows) {
   // ESP-IDF's I2C panel IO transmits synchronously. The framebuffer is free
   // for reuse when this returns; no SPI-style DMA semaphore is needed.
-  return esp_lcd_panel_draw_bitmap(s_panel, 0, y, BOARD_DISPLAY_W,
-                                   y + rows, pixels);
+  (void)y;
+  (void)rows;
+  return esp_lcd_panel_draw_bitmap(s_panel, 0, 0, BOARD_DISPLAY_NATIVE_W,
+                                   BOARD_DISPLAY_NATIVE_H, pixels);
 }
 
 esp_err_t display_panel_brightness(uint8_t percent) {

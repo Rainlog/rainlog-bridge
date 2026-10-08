@@ -5,7 +5,11 @@
 #include "display_panel.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
-#if BOARD_DISPLAY_FONT == BOARD_FONT_6X10
+#if BOARD_DISPLAY_FONT == BOARD_FONT_4X6
+#include "font4x6.h"
+#define DISPLAY_FONT_REGULAR font4x6
+#define DISPLAY_FONT_BOLD font4x6_bold
+#elif BOARD_DISPLAY_FONT == BOARD_FONT_6X10
 #include "font6x10.h"
 #define DISPLAY_FONT_REGULAR font6x10
 #define DISPLAY_FONT_BOLD font6x10_bold
@@ -75,8 +79,10 @@ static void put_pixel(int x, int y, display_color_t color) {
     return;
   }
 #if BOARD_DISPLAY_SSD1306
-  uint8_t *page = &s_fb[(y / 8) * DISPLAY_W + x];
-  uint8_t mask = 1U << (y % 8);
+  int native_x = y;
+  int native_y = BOARD_DISPLAY_NATIVE_H - 1 - x;
+  uint8_t *page = &s_fb[(native_y / 8) * BOARD_DISPLAY_NATIVE_W + native_x];
+  uint8_t mask = 1U << (native_y % 8);
   if (color)
     *page |= mask;
   else

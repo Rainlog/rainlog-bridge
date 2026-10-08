@@ -14,7 +14,10 @@
 #define DISPLAY_H BOARD_DISPLAY_H
 
 // Text at scale s advances GLYPH*s pixels and is GLYPH_H*s pixels tall.
-#if BOARD_DISPLAY_FONT == BOARD_FONT_6X10
+#if BOARD_DISPLAY_FONT == BOARD_FONT_4X6
+#define GLYPH 4
+#define GLYPH_H 6
+#elif BOARD_DISPLAY_FONT == BOARD_FONT_6X10
 #define GLYPH 6
 #define GLYPH_H 10
 #elif BOARD_DISPLAY_FONT == BOARD_FONT_8X13

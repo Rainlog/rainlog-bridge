@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate the 6x10 and 8x13 X11 bitmap font headers.
+"""Generate the 4x6, 6x10 and 8x13 X11 bitmap font headers.
 
 Usage: tools/gen-font.py
 
@@ -21,7 +21,7 @@ BASE_URL = "https://gitlab.freedesktop.org/xorg/font/misc-misc/-/raw/master"
 HERE = os.path.dirname(os.path.abspath(__file__))
 # (width, height, source BDFs). The 6x10 face has no upstream bold variant;
 # its bold table is emboldened horizontally within the same cell.
-FONTS = [(6, 10, ["6x10.bdf"]), (8, 13, ["8x13.bdf", "8x13B.bdf"])]
+FONTS = [(4, 6, ["4x6.bdf"]), (6, 10, ["6x10.bdf"]), (8, 13, ["8x13.bdf", "8x13B.bdf"])]
 
 
 def parse_bdf(path, height):

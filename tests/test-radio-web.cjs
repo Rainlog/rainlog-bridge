@@ -184,6 +184,13 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "playwright");
   await wifiCard.getByRole('button', {name: 'Add WU Uploader', exact: true}).click();
   assert.equal(await wifiCard.locator('.wurow .rl').inputValue(), 'Rainlog12345');
   assert.equal(await page.locator('#radioDeviceList .radio-card').count(), 2);
+  assert.equal(await page.locator('.radio-card').filter({hasText:'AcuRite Iris'}).evaluate(card => {
+    const rainlog = card.querySelector('.mapping-action').getBoundingClientRect();
+    const wu = card.querySelector('.wu-uploader-action').getBoundingClientRect();
+    return Math.abs(rainlog.top - wu.top) < 1 && wu.left >= rainlog.right
+      && Math.abs(rainlog.width - wu.width) < 1 && Math.abs(rainlog.height - wu.height) < 1;
+  }), true);
+
   const signal = page.locator('.radio-card').filter({hasText: 'La Crosse TX5U'}).locator('.radio-signal');
   assert.equal(await signal.isVisible(), true);
   assert.match(await signal.textContent(), /-82.5 dBm/);

@@ -345,7 +345,9 @@ function refreshUploaderButtons(): void {
       // updates the same card and carries its uploader to the new identity.
       own.querySelector<HTMLInputElement>('.wd')!.value = device;
     }
-    card.append(button);
+    const rainlogAction = card.querySelector('.mapping-action, .wifi-rainlog-action:not([hidden])');
+    if (rainlogAction) card.querySelector('.device-actions')!.append(button);
+    else card.append(button);
     button.hidden = own !== null;
     button.disabled = !own && wuRows().length >= WU_MAP_MAX;
     button.title = '';
@@ -685,6 +687,7 @@ function renderWifiRainlog(card: HTMLElement, client: ApClient): void {
     note.textContent = `Join "${apSsid}" to open this weather station’s settings.`;
     panel.append(note);
   }
+  refreshUploaderButtons();
 }
 
 function renderDevices(list: ApClient[]): void {

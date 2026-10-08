@@ -17,7 +17,8 @@ size_t framebuffer_allocation;
 static display_color_t pixel_at(int index) {
 #if BOARD_DISPLAY_SSD1306
   int x = index % DISPLAY_W, y = index / DISPLAY_W;
-  return (frame[(y / 8) * DISPLAY_W + x] >> (y % 8)) & 1;
+  int nx = y, ny = BOARD_DISPLAY_NATIVE_H - 1 - x;
+  return (frame[(ny / 8) * BOARD_DISPLAY_NATIVE_W + nx] >> (ny % 8)) & 1;
 #else
   return frame[index];
 #endif
@@ -187,16 +188,6 @@ int main(void) {
 #if BOARD_DISPLAY_FONT == BOARD_FONT_6X10
   assert(GLYPH == 6 && GLYPH_H == 10);
 #if BOARD_DISPLAY_SSD1306
-  // Eighteen characters fit from x=21 with the last cell's blank column
-  // clipped. Verify the final glyph still has its complete five-pixel face.
-  display_clear(COLOR_BLACK);
-  display_text(21, 0, 1, COLOR_WHITE, "AAAAAAAAAAAAAAAAAA");
-  display_flush();
-  assert(pixel_at(3 * DISPLAY_W + 123) == COLOR_WHITE);
-  assert(pixel_at(3 * DISPLAY_W + 127) == COLOR_WHITE);
-  display_clear(COLOR_BLACK);
-  display_text(0, y, 1, COLOR_WHITE, text);
-  display_flush();
 #endif
   // Known X11 6x10 'A' strokes verify bit order, cell advance and scaling.
   assert(pixel_at((y + 1) * DISPLAY_W + 2) == COLOR_WHITE);
@@ -222,20 +213,21 @@ int main(void) {
   display_fill_rect(0, 0, 1, 1, COLOR_RED);
   display_fill_rect(1, 7, 1, 1, COLOR_BLUE);
   display_fill_rect(2, 8, 1, 1, COLOR_GREEN);
-  display_fill_rect(127, 63, 1, 1, COLOR_WHITE);
+  display_fill_rect(63, 127, 1, 1, COLOR_WHITE);
   display_flush();
-  assert(frame[0] == 0x01);
-  assert(frame[1] == 0x80);
+  assert(frame[7 * 128] == 0x80);
+  assert(frame[7 * 128 + 7] == 0x40);
   assert(frame[2] == 0);
-  assert(frame[128 + 2] == 0x01);
-  assert(frame[1023] == 0x80);
+  assert(frame[7 * 128 + 8] == 0x20);
+  assert(frame[127] == 0x01);
   unsigned count = 0;
   for (unsigned i = 0; i < sizeof(frame); i++) count += frame[i] != 0;
   assert(count == 4);
   display_fill_rect(0, 1, 1, 1, COLOR_WHITE);
   display_fill_rect(0, 0, 1, 1, COLOR_BLACK);
   display_flush();
-  assert(frame[0] == 0x02);
+  assert(frame[7 * 128] == 0);
+  assert(frame[7 * 128 + 1] == 0x80);
   display_clear(COLOR_WHITE);
   display_flush();
   for (unsigned i = 0; i < sizeof(frame); i++) assert(frame[i] == 0xff);
