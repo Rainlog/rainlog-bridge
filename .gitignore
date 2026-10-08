@@ -43,3 +43,7 @@ build-debug/
 build-lilygo-debug/
 sdkconfig.debug*
 sdkconfig.lilygo.debug*
+
+# Separate heap-attribution diagnostic build directories
+build-debug-audit/
+build-lilygo-debug-audit/

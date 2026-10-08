@@ -15,7 +15,8 @@ typedef struct {
 // Replacements and counter resets rebase without adding their existing rain.
 bool rain_counter_update(rain_counter_t *, uint32_t gauge,
                          const weather_packet_t *);
-// Timestamped WU-compatible query, including Rainlog station credentials.
+// Timestamped WU-compatible query, optionally including Rainlog credentials.
+// A zero gauge emits no Rainlog ID and is sent only to a device WU uploader.
 // Returns false on missing rain, invalid time/model, or insufficient space.
 bool rain_upload_encode(char *out, size_t size, uint32_t gauge,
                         const char *key, const weather_packet_t *,

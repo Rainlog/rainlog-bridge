@@ -15,16 +15,15 @@ static const char *TAG = "radio-upload";
 #define UPLOAD_INTERVAL_US ((int64_t)305 * 1000000)
 static struct {
   uint32_t gauge;
+  char storage_key[16];
   rain_counter_t counter;
   int64_t last_upload, last_reading;
   bool dirty;
-} states[RADIO_MAP_MAX];
+} states[RADIO_MAP_MAX + WU_MAP_MAX];
 
-static bool load_counter(uint32_t gauge, rain_counter_t *counter) {
+static bool load_counter(const char *key, uint32_t gauge, rain_counter_t *counter) {
   nvs_handle_t nvs;
   if (nvs_open("radio_rain", NVS_READWRITE, &nvs) != ESP_OK) return false;
-  char key[16];
-  snprintf(key, sizeof(key), "g%lu", (unsigned long)gauge);
   size_t size = sizeof(*counter);
   esp_err_t err = nvs_get_blob(nvs, key, counter, &size);
   nvs_close(nvs);
@@ -35,11 +34,9 @@ static bool load_counter(uint32_t gauge, rain_counter_t *counter) {
   return err == ESP_OK && size == sizeof(*counter) &&
          counter->version == 1 && counter->gauge_id == gauge;
 }
-static bool save_counter(const rain_counter_t *counter) {
+static bool save_counter(const char *key, const rain_counter_t *counter) {
   nvs_handle_t nvs;
   if (nvs_open("radio_rain", NVS_READWRITE, &nvs) != ESP_OK) return false;
-  char key[16];
-  snprintf(key, sizeof(key), "g%lu", (unsigned long)counter->gauge_id);
   esp_err_t err = nvs_set_blob(nvs, key, counter, sizeof(*counter));
   if (err == ESP_OK) err = nvs_commit(nvs);
   nvs_close(nvs);
@@ -54,17 +51,37 @@ void radio_upload_poll(bool (*submit)(const char *)) {
   size_t count = radio_sensors(sensors, RADIO_SENSORS_MAX);
   int64_t now = esp_timer_get_time();
   time_t wall = time(NULL);
-  for (unsigned i = 0; i < config_get()->radio_map_count; i++) {
-    // Copy because settings can be saved while a network upload is running.
-    radio_mapping_t map = config_get()->radio_map[i];
-    if (states[i].gauge != map.gauge_id) {
+  unsigned rainlog_count = config_get()->radio_map_count;
+  for (unsigned i = 0; i < rainlog_count + config_get()->wu_map_count; i++) {
+    radio_mapping_t map = {0};
+    if (i < rainlog_count) {
+      map = config_get()->radio_map[i];
+      if (!map.gauge_id) continue;
+    }
+    else {
+      wu_mapping_t wu = config_get()->wu_map[i - rainlog_count];
+      unsigned model, id, channel;
+      int end = 0;
+      if (sscanf(wu.device, "radio:%u:%u:%u%n", &model, &id, &channel, &end) != 3 ||
+          wu.device[end] || model > 1 || id > UINT16_MAX || channel > UINT8_MAX) continue;
+      // A Rainlog mapping already submits this sensor to both targets.
+      if (config_find_radio_mapping(model, id, (char)channel)) continue;
+      map.model = model; map.sensor_id = id; map.channel = (char)channel;
+    }
+    char storage_key[16];
+    uint32_t counter_gauge = map.gauge_id ? map.gauge_id : 1;
+    if (map.gauge_id) snprintf(storage_key, sizeof(storage_key), "g%lu", (unsigned long)map.gauge_id);
+    else snprintf(storage_key, sizeof(storage_key), "r%u_%u_%u", map.model,
+                  (unsigned)(uint16_t)map.sensor_id, (unsigned char)map.channel);
+    if (strcmp(states[i].storage_key, storage_key)) {
       rain_counter_t counter = {0};
-      if (!load_counter(map.gauge_id, &counter)) {
-        ESP_LOGW(TAG, "Cannot load counter for gauge %lu", (unsigned long)map.gauge_id);
+      if (!load_counter(storage_key, counter_gauge, &counter)) {
+        ESP_LOGW(TAG, "Cannot load counter %s", storage_key);
         continue;
       }
       memset(&states[i], 0, sizeof(states[i]));
-      states[i].gauge = map.gauge_id;
+      states[i].gauge = counter_gauge;
+      snprintf(states[i].storage_key, sizeof(states[i].storage_key), "%s", storage_key);
       states[i].counter = counter;
     }
     const radio_reading_t *reading = NULL;
@@ -74,10 +91,10 @@ void radio_upload_poll(bool (*submit)(const char *)) {
         reading = &sensors[j].reading;
     }
     if (!reading || !reading->packet.has_rain) continue;
-    if (rain_counter_update(&states[i].counter, map.gauge_id, &reading->packet))
+    if (rain_counter_update(&states[i].counter, counter_gauge, &reading->packet))
       states[i].dirty = true;
     if (states[i].dirty) {
-      if (!save_counter(&states[i].counter)) {
+      if (!save_counter(storage_key, &states[i].counter)) {
         ESP_LOGW(TAG, "Cannot persist counter for gauge %lu", (unsigned long)map.gauge_id);
         continue;
       }

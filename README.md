@@ -227,8 +227,8 @@ cp main/config.example.h main/config.h   # once, before the first build
 git submodule update --init --recursive  # pinned SX127x radio driver
 ./build.sh                               # build the C6
 BOARD=lilygo ./build.sh                  # build the LILYGO
-PORT=/dev/ttyACM3 ./build.sh flash        # C6: build and flash
-BOARD=lilygo PORT=/dev/ttyACM2 ./build.sh flash  # LILYGO: build and flash
+PORT=/dev/serial/by-id/<confirmed-c6-device> ./build.sh app-flash
+BOARD=lilygo PORT=/dev/serial/by-id/<confirmed-lilygo-device> ./build.sh app-flash
 ```
 
 `config.h` is gitignored and holds only compile-time fallbacks; everything
@@ -353,7 +353,14 @@ artwork wraps right by two pixels before rotation.
 Brightness controls LCD backlight PWM or
 OLED contrast. Flush finishes before the single drawing buffer is reused.
 
+The C6 renders its LCD in 16-row RGB565 strips using one 5,504-byte DMA buffer,
+instead of a 110,080-byte full framebuffer. The ST7789 retains the pixels in
+its own display RAM. Each strip transfer completes before buffer reuse. Status
+values are captured once per frame, then the drawing callback is replayed with
+clipping for each strip. The OLED retains its 1,024-byte packed framebuffer.
+
 Run `./tests/test-display.sh` for host checks of RGB565 colors, drawing bounds,
+strip rendering versus full-frame output across all 16-row boundaries,
 alpha handling, brightness and OLED page packing on both screen geometries.
 Controller datasheets and their source links are in `datasheets/`. Both display
 backends were flashed and checked on hardware on 2026-10-07.
@@ -413,7 +420,7 @@ deliberately out of scope, since none are useful without burning eFuses.
   auth path has no throttle, so password guessing against it from the LAN runs
   at full speed. Since a correct guess returns the WU upload keys, treat the
   bridge WiFi password as the real boundary and make it a good one.
-- WiFi passwords are never returned by the config API. **The per-gauge WU
+- WiFi passwords are never returned by the config API. **The device WU
   upload keys are**, deliberately: `GET /config` includes them so the page can
   populate the form, shown behind a Show toggle. They are per-station upload
   keys rather than network credentials, and the route is already gated.

@@ -26,7 +26,8 @@
 static const char *TAG = "forwarder";
 static char s_bridge_id[13];
 
-#define QUERY_BUF 1024
+// Captured station query (1024 bytes) plus the trusted device-identity tag.
+#define QUERY_BUF (1024 + 64)
 #define FORWARD_QUEUE_LEN 8
 // The worker runs the TLS handshake (mbedtls) inline plus two QUERY_BUF
 // buffers; the default-size stack would overflow.
@@ -153,7 +154,7 @@ static int build_query(const char *station_id, const char *key, const char *raw,
     const char *eq = strchr(tok, '=');
     size_t klen = eq ? (size_t)(eq - tok) : strlen(tok);
     if (key_is(tok, klen, "ID") || key_is(tok, klen, "PASSWORD") ||
-        key_is(tok, klen, "rlsource") || key_is(tok, klen, "sensor_model") ||
+        key_is(tok, klen, "wu_device") || key_is(tok, klen, "rlsource") || key_is(tok, klen, "sensor_model") ||
         key_is(tok, klen, "sensor_id") || key_is(tok, klen, "sensor_channel") ||
         key_is(tok, klen, "bridge_model") || key_is(tok, klen, "bridge_id")) {
       continue;
@@ -167,6 +168,28 @@ static int build_query(const char *station_id, const char *key, const char *raw,
   }
   free(copy);
   return n;
+}
+
+// Device identity travels in the existing query/retry format, so old retry
+// files still load and new ones retain MAC identity across DHCP changes.
+static void upload_device(const char *query, uint32_t src_ip, char out[40]) {
+  out[0] = 0;
+  if (http_util_form_get(query, "wu_device", out, 40) &&
+      config_device_identity_valid(out)) return;
+  char model[32], id[16], channel[4] = {0};
+  if (http_util_form_get(query, "sensor_model", model, sizeof(model)) &&
+      http_util_form_get(query, "sensor_id", id, sizeof(id))) {
+    http_util_form_get(query, "sensor_channel", channel, sizeof(channel));
+    unsigned protocol = !strcmp(model, "LaCrosse-TX5U") ? 0 : 1;
+    snprintf(out, 40, "radio:%u:%lu:%u", protocol, strtoul(id, NULL, 10),
+             (unsigned char)channel[0]);
+    if (config_device_identity_valid(out)) return;
+  }
+  uint8_t mac[6];
+  if (ap_clients_mac_for_ip(src_ip, mac))
+    snprintf(out, 40, "%02x:%02x:%02x:%02x:%02x:%02x", mac[0], mac[1],
+             mac[2], mac[3], mac[4], mac[5]);
+  else out[0] = 0;
 }
 
 // HTTPS GET to host+path?query, capturing up to resp_cap bytes of the body.
@@ -289,6 +312,7 @@ static void rl_mark_sent(uint32_t gauge, int64_t now) {
 // reading) - i.e. the reading was delivered to the server. A false return is a
 // transport/non-200 failure worth retrying. Updates the LED / stats / result.
 static bool try_rainlog(const char *raw_query, uint32_t src_ip) {
+  if (!parse_rainlog_gauge_id(raw_query)) return true;
   char rl_query[QUERY_BUF + 256];
   const char *rl_send = raw_query;
   char model[128];
@@ -344,7 +368,9 @@ static bool try_rainlog(const char *raw_query, uint32_t src_ip) {
 // transport failure (WU unreachable) returns false for the retry buffer.
 static bool try_wu(const char *raw_query, uint32_t src_ip) {
   uint32_t gauge = parse_rainlog_gauge_id(raw_query);
-  const wu_mapping_t *m = config_find_wu_mapping(gauge);
+  char device[40];
+  upload_device(raw_query, src_ip, device);
+  const wu_mapping_t *m = config_find_wu_device(device, gauge);
   if (m == NULL || m->wu_id[0] == '\0') {
     return true;  // no WU relay for this gauge
   }
@@ -531,7 +557,9 @@ static void forward_upload(const char *raw_query, uint32_t src_ip) {
   // window (Rainlog's rate limit); a skipped intermediate is full state and
   // timestamped on receipt, so nothing is lost. Real-timestamped readings are
   // always forwarded. Skips are not buffered (a fresher one will come).
-  if (dateutc_is_now(raw_query)) {
+  if (!parse_rainlog_gauge_id(raw_query)) {
+    rainlog_done = true; // WU-only stations never send to Rainlog.
+  } else if (dateutc_is_now(raw_query)) {
     uint32_t gauge = parse_rainlog_gauge_id(raw_query);
     int64_t now = esp_timer_get_time();
     if (rl_throttled(gauge, now)) {
@@ -619,7 +647,8 @@ static void retry_pass(void) {
 // Queued/retried uploads must still belong to the configured source.
 static bool source_conflict(const char *query) {
   bool radio_source = strstr(query, "&rlsource=radio&") != NULL;
-  return config_gauge_uses_radio(parse_rainlog_gauge_id(query)) != radio_source;
+  uint32_t gauge = parse_rainlog_gauge_id(query);
+  return gauge && config_gauge_uses_radio(gauge) != radio_source;
 }
 
 static bool enqueue_upload(const char *query, uint32_t src_ip);
@@ -684,7 +713,24 @@ static bool enqueue_upload(const char *raw_query, uint32_t src_ip) {
 bool forwarder_submit(const char *raw_query, uint32_t src_ip) {
   if (!raw_query || config_gauge_uses_radio(parse_rainlog_gauge_id(raw_query)))
     return false;
-  return enqueue_upload(raw_query, src_ip);
+  uint8_t mac[6];
+  if (!ap_clients_mac_for_ip(src_ip, mac)) return enqueue_upload(raw_query, src_ip);
+  // Replace any supplied identity with the MAC observed on our own SoftAP.
+  char *copy = strdup(raw_query);
+  char *tagged = malloc(strlen(raw_query) + 64);
+  if (!copy || !tagged) { free(copy); free(tagged); return false; }
+  size_t used = 0;
+  char *save = NULL;
+  for (char *part = strtok_r(copy, "&", &save); part; part = strtok_r(NULL, "&", &save)) {
+    char *eq = strchr(part, '=');
+    if (key_is(part, eq ? (size_t)(eq - part) : strlen(part), "wu_device")) continue;
+    used += sprintf(tagged + used, "%s%s", used ? "&" : "", part);
+  }
+  snprintf(tagged + used, 64, "&wu_device=%02x:%02x:%02x:%02x:%02x:%02x",
+           mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+  bool queued = enqueue_upload(tagged, src_ip);
+  free(copy); free(tagged);
+  return queued;
 }
 
 const char *forwarder_last_result(void) { return s_last_result; }

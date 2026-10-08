@@ -1,4 +1,5 @@
 import { createRadio } from './radio';
+import { createDeviceCard, renderSignal, uploaderButton } from './device-card';
 import { createManualUpdate } from './manual-update';
 declare const RADIO_MHZ: number;
 // Rainlog Bridge config page behavior. Bundled + minified by build.mjs and
@@ -23,6 +24,7 @@ interface ScannedNet {
 }
 
 interface WuMapping {
+  device?: string;
   gauge_id: number;
   wu_id: string;
   wu_key: string; // stored key; shown behind the row's Show toggle
@@ -282,43 +284,99 @@ function attachPwToggle(input: HTMLInputElement): void {
 
 // ---- WU forwarding map rows ----------------------------------------------
 
+function wuRows(): HTMLElement[] {
+  return Array.from(document.querySelectorAll<HTMLElement>('.wurow'));
+}
+const uploaderGauges = new WeakMap<HTMLElement, () => number>();
+function cardDevice(card: HTMLElement): string {
+  return card.classList.contains('radio-card')
+    ? `radio:${card.dataset.sensor}`
+    : card.dataset.device!;
+}
+function rowGauge(row: HTMLElement): number {
+  return Number(
+    row.querySelector<HTMLInputElement>('.rl')!.value.replace(/^Rainlog/i, ''),
+  );
+}
+function rowDevice(row: HTMLElement): string {
+  return row.querySelector<HTMLInputElement>('.wd')!.value;
+}
+function attachWuUploader(card: HTMLElement, gauge: () => number): void {
+  uploaderGauges.set(card, gauge);
+  const button = uploaderButton('Add WU Uploader', () => {
+    const id = gauge();
+    const device = cardDevice(card);
+    let row = wuRows().find(
+      (row) =>
+        rowDevice(row) === device ||
+        (!rowDevice(row) && id && rowGauge(row) === id),
+    );
+    if (!row)
+      row = addRow({ device, gauge_id: id, wu_id: '', wu_key: '' }, card);
+    else if (row.parentElement?.id === 'pendingWuUploaders') card.append(row);
+    refreshUploaderButtons();
+    row?.querySelector<HTMLInputElement>('.wu')?.focus();
+  });
+  button.classList.add('wu-uploader-action');
+  card.append(button);
+  refreshUploaderButtons();
+}
+function refreshUploaderButtons(): void {
+  document.querySelectorAll<HTMLElement>('.device-card').forEach((card) => {
+    const gauge = uploaderGauges.get(card)?.() ?? 0;
+    const device = cardDevice(card);
+    let own = card.querySelector<HTMLElement>('.wurow');
+    const button = card.querySelector<HTMLButtonElement>('.wu-uploader-action');
+    if (!button) return;
+    const pending = wuRows().filter(
+      (row) => row.parentElement?.id === 'pendingWuUploaders',
+    );
+    const saved =
+      pending.find((row) => rowDevice(row) === device) ??
+      pending.find(
+        (row) => !rowDevice(row) && gauge && rowGauge(row) === gauge,
+      );
+    if (!own && saved) {
+      card.append(saved);
+      own = saved;
+    }
+    if (own) {
+      // Bind old gauge mappings when their device is known. A TX5U replacement
+      // updates the same card and carries its uploader to the new identity.
+      own.querySelector<HTMLInputElement>('.wd')!.value = device;
+    }
+    card.append(button);
+    button.hidden = own !== null;
+    button.disabled = !own && wuRows().length >= WU_MAP_MAX;
+    button.title = '';
+  });
+}
+
 // Append one gauge->WU mapping row. `m` pre-fills it; omit for a blank row.
-function addRow(m?: WuMapping): void {
-  const rows = el('wuRows');
-  if (rows.children.length >= WU_MAP_MAX) {
+function addRow(
+  m?: WuMapping,
+  host = el('pendingWuUploaders'),
+): HTMLElement | undefined {
+  if (wuRows().length >= WU_MAP_MAX) {
     return;
   }
   const div = document.createElement('div');
-  div.className = 'wurow';
+  div.className = 'wurow uploader-panel';
+  const legend = document.createElement('h4');
+  legend.textContent = 'WU Uploader';
+  div.append(legend);
 
-  // The Rainlog station id is the string "Rainlog<gaugeId>" (what the user
-  // sees on rainlog.org and typed into their console); the firmware accepts
-  // that or the bare gauge number.
+  // Hidden legacy gauge preserves old saved mappings until a device is seen.
   const gauge = document.createElement('input');
   gauge.className = 'rl';
-
+  gauge.type = 'hidden';
   gauge.setAttribute('form', 'form');
-  gauge.setAttribute('aria-label', 'Rainlog station ID');
-  gauge.placeholder = 'Rainlog station ID (Rainlog12345)';
-  if (m) {
-    gauge.value = `Rainlog${m.gauge_id}`;
-  }
-
-  const picker = document.createElement('select');
-  picker.className = 'stationPicker';
-  picker.setAttribute('aria-label', 'Choose a known Rainlog station');
-  picker.addEventListener('change', () => {
-    if (picker.value) gauge.value = picker.value;
-  });
-  const station = document.createElement('div');
-  station.className = 'combo';
-  station.append(gauge, picker);
-
-  // Downward arrow between the Rainlog station and the WU credentials it
-  // forwards to, making the row read as "this forwards down to this".
-  const arrow = document.createElement('div');
-  arrow.className = 'fwdarrow';
-  arrow.textContent = '↓';
+  gauge.value = m?.gauge_id ? `Rainlog${m.gauge_id}` : '';
+  const device = document.createElement('input');
+  device.className = 'wd';
+  device.type = 'hidden';
+  device.setAttribute('form', 'form');
+  device.value = m?.device ?? '';
 
   const wuId = document.createElement('input');
   wuId.className = 'wu';
@@ -340,75 +398,29 @@ function addRow(m?: WuMapping): void {
   const rm = document.createElement('button');
   rm.type = 'button';
   rm.className = 'rm';
-  rm.textContent = 'Remove';
+  rm.textContent = 'Remove WU Uploader';
   rm.addEventListener('click', () => {
     div.remove();
-    refreshAddButton();
+    refreshUploaderButtons();
   });
 
-  div.append(station, arrow, wuId, wuKey, rm);
+  div.append(gauge, device, wuId, wuKey, rm);
   attachPwToggle(wuKey); // wraps wuKey in place (stays before rm)
-  rows.appendChild(div);
-  refreshAddButton();
-  refreshKnownGauges();
-}
-
-function refreshAddButton(): void {
-  (el('addBtn') as HTMLButtonElement).disabled =
-    el('wuRows').children.length >= WU_MAP_MAX;
+  host.appendChild(div);
+  return div;
 }
 
 // Give each row's inputs contiguous indexed names (rl0/wu0/wk0, rl1/...) right
 // before the browser serializes the form, so the firmware sees a dense list.
 function numberRows(): void {
-  const rows = el('wuRows').children;
+  const rows = wuRows();
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
     (row.querySelector('.rl') as HTMLInputElement).name = `rl${i}`;
+    (row.querySelector('.wd') as HTMLInputElement).name = `wd${i}`;
     (row.querySelector('.wu') as HTMLInputElement).name = `wu${i}`;
     (row.querySelector('.wk') as HTMLInputElement).name = `wk${i}`;
   }
-}
-
-// Saved mappings and station IDs observed in console uploads are suggestions.
-// The station picker fills an editable input for stations not yet seen.
-const knownGaugeIds = new Set<number>();
-function refreshKnownGauges(ids: number[] = []): void {
-  ids.forEach((id) => {
-    if (Number.isInteger(id) && id > 0 && id <= 4294967295)
-      knownGaugeIds.add(id);
-  });
-  document
-    .querySelectorAll<HTMLInputElement>('#radioRows [data-field=gauge]')
-    .forEach((input) => {
-      const id = Number(input.value.replace(/^Rainlog/i, ''));
-      if (Number.isInteger(id) && id > 0 && id <= 4294967295)
-        knownGaugeIds.add(id);
-    });
-  const inputs = Array.from(
-    document.querySelectorAll<HTMLInputElement>('#wuRows .rl'),
-  );
-  const used = new Set(
-    inputs
-      .filter((input) => input.value)
-      .map((input) => Number(input.value.replace(/^Rainlog/i, ''))),
-  );
-  const unused = [...knownGaugeIds].filter((id) => !used.has(id));
-  const blank = inputs.filter((input) => !input.value);
-  if (unused.length === 1 && blank.length === 1)
-    blank[0].value = `Rainlog${unused[0]}`;
-  inputs.forEach((input) => {
-    const picker = input.parentElement!.querySelector('select')!;
-    picker.replaceChildren(new Option('Enter station ID manually', ''));
-    [...knownGaugeIds]
-      .sort((a, b) => a - b)
-      .forEach((id) => picker.add(new Option(`Rainlog${id}`, `Rainlog${id}`)));
-    picker.value = knownGaugeIds.has(
-      Number(input.value.replace(/^Rainlog/i, '')),
-    )
-      ? input.value
-      : '';
-  });
 }
 
 // ---- scanning + WiFi test -------------------------------------------------
@@ -485,6 +497,8 @@ const manualUpdate = createManualUpdate();
 
 function renderOta(s: OtaStatus): void {
   manualUpdate.setStatus(s);
+  el('hardwareTag').hidden = !s.board;
+  el('hardwareTag').textContent = s.board ? `Hardware tag: ${s.board}` : '';
   const apply = el('otaApplyBtn') as HTMLButtonElement;
   const check = el('otaCheckBtn') as HTMLButtonElement;
   apply.hidden = !s.available || s.phase === 'updating';
@@ -608,81 +622,115 @@ function ageText(s: number): string {
   return h < 24 ? `${h}h ago` : `${Math.floor(h / 24)}d ago`;
 }
 
+function renderWifiRainlog(card: HTMLElement, client: ApClient): void {
+  let panel = card.querySelector<HTMLElement>('.wifi-rainlog');
+  let add = card.querySelector<HTMLButtonElement>('.wifi-rainlog-action');
+  if (!add) {
+    add = uploaderButton('Add Rainlog Uploader', () => {});
+    add.classList.add('wifi-rainlog-action');
+    card.querySelector('.device-actions')!.prepend(add);
+  }
+  add.onclick = () => {
+    card.dataset.showRainlog = 'true';
+    renderWifiRainlog(card, client);
+  };
+  add.hidden = !!client.gauge_id || card.dataset.showRainlog === 'true';
+  if (!add.hidden) return;
+  if (!panel) {
+    panel = document.createElement('div');
+    panel.className = 'uploader-panel wifi-rainlog';
+    card.append(panel);
+  }
+  panel.replaceChildren();
+  const title = document.createElement('h4');
+  title.textContent = client.gauge_id
+    ? 'Rainlog Uploader Enabled'
+    : 'Rainlog Uploader';
+  const station = document.createElement('p');
+  station.className = 'uploader-station';
+  station.textContent = client.gauge_id
+    ? `Rainlog${client.gauge_id}`
+    : 'Configure on your weather station';
+  const hint = document.createElement('p');
+  hint.className = 'hint';
+  hint.textContent = client.gauge_id
+    ? 'Rainlog credentials are configured on the weather station.'
+    : 'Enter your Rainlog station ID and PWS key in your weather station’s uploader settings. It will appear here after the first reading.';
+  panel.append(title, station, hint);
+  if (client.rx > 0 || client.err !== 0) {
+    const stats = document.createElement('div');
+    stats.className = 'uploader-stats small';
+    const bits = [`${client.rx} received`, `${client.rl} to Rainlog`];
+    if (client.wu > 0) bits.push(`${client.wu} to WU`);
+    stats.textContent = bits.join(' · ');
+    for (const item of deviceBadges(client)) {
+      const badge = document.createElement('span');
+      badge.className = item.warn ? 'devwarn' : 'deverr';
+      badge.textContent = item.text;
+      stats.append(' ', badge);
+    }
+    panel.append(stats);
+  }
+  if (client.ip && !client.you && onBridgeWifi()) {
+    const link = document.createElement('a');
+    link.className = 'mini open';
+    link.textContent = 'Open weather station';
+    link.href = `http://${client.ip}/`;
+    link.target = '_blank';
+    link.rel = 'noopener';
+    panel.append(link);
+  } else if (client.ip && !client.you) {
+    const note = document.createElement('p');
+    note.className = 'hint';
+    note.textContent = `Join "${apSsid}" to open this weather station’s settings.`;
+    panel.append(note);
+  }
+}
+
 function renderDevices(list: ApClient[]): void {
   const wrap = el('devList');
   const empty = el('devEmpty');
-  wrap.innerHTML = '';
   empty.hidden = list.length > 0;
   empty.textContent = `No devices yet - connect your weather station to "${apSsid}".`;
+  for (const card of Array.from(wrap.children)) {
+    if (
+      !list.some(
+        (client) => client.mac === (card as HTMLElement).dataset.device,
+      ) &&
+      !card.querySelector('.uploader-panel')
+    )
+      card.remove();
+  }
   for (const c of list) {
-    const div = document.createElement('div');
-    div.className = 'dev';
-
-    const main = document.createElement('div');
-    main.className = 'devmain';
-    const dot = document.createElement('span');
-    dot.className = c.connected ? 'dot on' : 'dot';
-    dot.title = c.connected ? 'Connected' : 'Disconnected';
-    // Best available identity: what the user named it, else what the device
-    // calls itself (DHCP hostname), else its maker.
-    const title = c.name || c.hostname || c.vendor;
-    const name = document.createElement('b');
-    name.textContent = title;
-    main.append(dot, name);
-    if (c.connected && c.rssi !== 0) {
-      const bars = document.createElement('span');
-      bars.className = 'bars';
-      bars.textContent = signalBars(c.rssi);
-      main.append(bars);
+    let card = Array.from(wrap.children).find(
+      (card) => (card as HTMLElement).dataset.device === c.mac,
+    ) as HTMLElement | undefined;
+    if (!card) {
+      card = createDeviceCard('wifi-card dev', c.mac);
+      wrap.append(card);
+      attachWuUploader(card, () => Number(card!.dataset.gauge ?? 0));
     }
+    card.dataset.gauge = String(c.gauge_id ?? 0);
+    renderWifiRainlog(card, c);
+    const title = c.name || c.hostname || c.vendor;
+    const heading = card.querySelector('h4')!;
+    heading.textContent = title;
     if (c.you) {
       const you = document.createElement('span');
       you.className = 'you';
       you.textContent = 'this device';
-      main.append(you);
+      heading.append(you);
     }
-
-    const sub = document.createElement('div');
-    sub.className = 'devsub small';
-    const parts = [c.mac, c.ip || 'no address yet'];
-    if (c.gauge_id) parts.push(`Rainlog${c.gauge_id}`);
-    // Whichever identity facts the title doesn't already say.
-    if (c.hostname && c.hostname !== title) {
-      parts.push(c.hostname);
-    }
-    if (c.vendor !== title) {
-      parts.push(c.vendor);
-    }
-    if (!c.connected) {
-      parts.push(`last seen ${ageText(c.age_s)}`);
-    }
-    sub.textContent = parts.join(' · ');
-    div.append(main, sub);
-
-    // Upload stats + any latched errors, only once the device has uploaded
-    // (or tried and failed): received, forwarded to Rainlog, relayed to WU.
-    if (c.rx > 0 || c.err !== 0) {
-      const stats = document.createElement('div');
-      stats.className = 'devsub small';
-      const bits = [`${c.rx} received`, `${c.rl} to Rainlog`];
-      if (c.wu > 0) {
-        bits.push(`${c.wu} to WU`);
-      }
-      stats.textContent = bits.join(' · ');
-      for (const b of deviceBadges(c)) {
-        const badge = document.createElement('span');
-        badge.className = b.warn ? 'devwarn' : 'deverr';
-        badge.textContent = b.text;
-        stats.append(' ', badge);
-      }
-      div.append(stats);
-    }
-
-    const actions = document.createElement('div');
-    actions.className = 'row';
-    // No link for the viewer's own device (it would just open your phone) or
-    // before the device has a lease. From the home LAN the AP subnet is
-    // unroutable, so show how to reach it instead of a dead link.
+    card.querySelector('.sensor-identity')!.textContent =
+      `${c.mac} · ${c.ip || 'no address yet'}`;
+    renderSignal(card, c.connected ? c.rssi : undefined, false);
+    const facts = [c.connected ? 'Connected' : `Last seen ${ageText(c.age_s)}`];
+    if (c.hostname && c.hostname !== title) facts.push(c.hostname);
+    if (c.vendor !== title) facts.push(c.vendor);
+    if (c.gauge_id) facts.push(`Rainlog${c.gauge_id}`);
+    card.querySelector('.sensor-detail')!.textContent = facts.join(' · ');
+    const actions = card.querySelector('.device-management')!;
+    actions.replaceChildren();
     if (c.ip && !c.you) {
       if (onBridgeWifi()) {
         const open = document.createElement('a');
@@ -699,15 +747,10 @@ function renderDevices(list: ApClient[]): void {
         actions.append(note);
       }
     }
-    const ren = document.createElement('button');
-    ren.type = 'button';
-    ren.className = 'mini';
-    ren.textContent = 'Rename';
-    ren.addEventListener('click', () => void renameDevice(c));
-    actions.append(ren);
-    div.append(actions);
-    wrap.appendChild(div);
+    card.querySelector<HTMLButtonElement>('.name-edit')!.onclick = () =>
+      void renameDevice(c);
   }
+  refreshUploaderButtons();
 }
 
 async function pollDevices(): Promise<void> {
@@ -715,7 +758,6 @@ async function pollDevices(): Promise<void> {
     if (wifiInterceptionActive) {
       const clients = (await (await fetch('/clients')).json()) as ApClient[];
       const gauges = clients.map((client) => client.gauge_id ?? 0);
-      refreshKnownGauges(gauges);
       radio?.setWifiGauges(gauges);
       renderDevices(clients);
     }
@@ -771,10 +813,6 @@ async function loadConfig(): Promise<void> {
   }
   if (cfg) {
     radio?.load(cfg);
-    refreshKnownGauges([
-      ...cfg.wu_map.map((mapping) => mapping.gauge_id),
-      ...(cfg.radio_map ?? []).map((mapping) => mapping.gauge_id),
-    ]);
     wifiInterceptionActive =
       cfg.wifi_interception_active ?? cfg.wifi_interception_enabled ?? true;
     el('wifiDevices').hidden = !wifiInterceptionActive;
@@ -793,13 +831,14 @@ async function loadConfig(): Promise<void> {
       addRow(m);
     }
   }
-  if (el('wuRows').children.length === 0) {
-    addRow(); // always show one empty row to invite a first mapping
-  }
+  refreshUploaderButtons();
   revalidate(); // reflect the loaded state on the Save button
 }
 
-const radio = RADIO_MHZ === 433 ? createRadio(attachPwToggle) : null;
+const radio =
+  RADIO_MHZ === 433
+    ? createRadio(attachPwToggle, attachWuUploader, refreshUploaderButtons)
+    : null;
 
 // Add a Show/Hide toggle to the static password fields (the WU key fields get
 // one as their rows are created).
@@ -814,7 +853,9 @@ addErrorSlot(field('ap_pass'), 'ap_pass_err');
 // Routes preserve unsaved fields and keep polling in sync with browser history.
 const tabs = document.querySelectorAll<HTMLAnchorElement>('.tab');
 function renderRoute(): void {
-  let active = Array.from(tabs).find((tab) => tab.pathname === location.pathname);
+  let active = Array.from(tabs).find(
+    (tab) => tab.pathname === location.pathname,
+  );
   if (!active) {
     active = tabs[0];
     history.replaceState(null, '', active.pathname);
@@ -829,9 +870,17 @@ function renderRoute(): void {
 }
 tabs.forEach((tab) => {
   tab.addEventListener('click', (event) => {
-    if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+    if (
+      event.button !== 0 ||
+      event.ctrlKey ||
+      event.metaKey ||
+      event.shiftKey ||
+      event.altKey
+    )
+      return;
     event.preventDefault();
-    if (location.pathname !== tab.pathname) history.pushState(null, '', tab.pathname);
+    if (location.pathname !== tab.pathname)
+      history.pushState(null, '', tab.pathname);
     renderRoute();
   });
 });
@@ -846,7 +895,7 @@ el('signOut').addEventListener('click', () => {
 });
 el('scanBtn').addEventListener('click', () => void scanlive());
 el('testBtn').addEventListener('click', test);
-el('addBtn').addEventListener('click', () => addRow());
+el('viewDevices').addEventListener('input', refreshUploaderButtons);
 el('otaCheckBtn').addEventListener('click', otaCheck);
 el('otaApplyBtn').addEventListener('click', otaApply);
 el('nets').addEventListener('change', (e) => {
@@ -883,10 +932,6 @@ el('form').addEventListener('submit', (e) => {
   numberRows();
   radio?.numberRows();
 });
-
-document
-  .getElementById('radioRows')
-  ?.addEventListener('input', () => refreshKnownGauges());
 
 document
   .getElementById('wifiInterceptionEnabled')

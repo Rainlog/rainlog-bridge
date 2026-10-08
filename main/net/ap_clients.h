@@ -91,3 +91,6 @@ esp_err_t ap_clients_set_name(const uint8_t mac[6], const char *name);
 
 // Erase every saved device name (factory reset).
 void ap_clients_clear_names(void);
+
+// Resolve identity at capture time, before DHCP addresses can be reused.
+bool ap_clients_mac_for_ip(uint32_t ip4, uint8_t mac[6]);

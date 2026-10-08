@@ -34,9 +34,7 @@ the regenerated files whenever you change anything under `src/`.
 ## Devices
 
 Devices lists Wi-Fi clients while interception is active and radio sensors on
-radio builds. The Weather Underground mapper lives here. Its editable station
-field offers IDs from saved mappings and captured Wi-Fi uploads; a single
-unassigned known ID fills a single empty row automatically. Both tabs' save
+radio builds. Wi-Fi and radio share card layouts, signal bars, uploader buttons and an edit icon beside each name. Names save immediately without rebooting; radio names are persisted by model, sensor ID and channel, independently of uploader assignments. Clearing a name restores the model heading. Wi-Fi Rainlog credentials remain on the weather station; its card shows the detected station ID or setup instructions. Radio Rainlog credentials are configured on its card. WU uploaders are keyed by Wi-Fi MAC or radio model/ID/channel and need only a WU station ID and key. A Rainlog uploader is optional. Saved uploaders are retained until their device card becomes available. Old gauge-based mappings load without losing credentials and keep forwarding by gauge until their device is known; saving its card binds the uploader to that identity. Polling preserves edits. Both tabs' save
 buttons submit the shared configuration.
 
 ## Radio setup

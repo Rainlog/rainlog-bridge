@@ -22,12 +22,12 @@ CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
 CONFIG_ESP_TLS_USING_MBEDTLS=y
 
-# TLS memory: the C6's heap is tight (AP+STA WiFi plus the ~110KB LCD
-# framebuffer), so the static 16KB TLS RX buffer pushed the first handshake to
+# TLS memory: with the former ~110KB LCD framebuffer, the static 16KB TLS
+# RX buffer pushed the first handshake to
 # rainlog.org over the edge: mbedtls_ssl_setup failed with
 # PSA_ERROR_INSUFFICIENT_MEMORY (-0x008D), breaking both forwarding and OTA.
-# Dynamic buffers size the TLS I/O buffers on demand and free the CA cert chain
-# after the handshake, cutting peak TLS RAM enough to fit.
+# Dynamic buffers size TLS I/O buffers on demand. CA/certificate configuration
+# remains allocated unless CONFIG_MBEDTLS_DYNAMIC_FREE_CONFIG_DATA is enabled.
 CONFIG_MBEDTLS_DYNAMIC_BUFFER=y
 
 # Custom 8MB dual-slot OTA partition table (partitions.csv). The WiFi+BLE+TLS

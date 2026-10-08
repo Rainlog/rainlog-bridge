@@ -107,6 +107,27 @@ static void oled_draw(uint32_t held) {
 }
 #endif
 
+typedef struct {
+  uint32_t held;
+  bool provisioned;
+} ui_frame_t;
+
+static void draw_frame(void *context) {
+  const ui_frame_t *frame = context;
+  display_clear(COLOR_BLACK);
+#if BOARD_DISPLAY_SSD1306
+  oled_draw(frame->held);
+#else
+  if (frame->held >= RESET_ARM_MS) {
+    screen_reset_draw(frame->held);
+  } else {
+    ui_draw_header();
+    if (frame->provisioned) screen_status_draw();
+    else screen_setup_draw();
+  }
+#endif
+}
+
 static void ui_task(void *arg) {
   (void)arg;
   while (true) {
@@ -115,13 +136,8 @@ static void ui_task(void *arg) {
     uint32_t held = button_held_ms();
     if (held >= RESET_ARM_MS) {
       display_set_backlight(config_get()->display_full_pct);
-      display_clear(COLOR_BLACK);
-#if BOARD_DISPLAY_SSD1306
-      oled_draw(held);
-#else
-      screen_reset_draw(held);
-#endif
-      display_flush();
+      ui_frame_t frame = {.held = held};
+      display_render(draw_frame, &frame);
       if (held >= RESET_HOLD_MS) {
         ESP_LOGW(TAG, "factory reset: clearing config + stats, rebooting");
         config_clear();
@@ -133,22 +149,11 @@ static void ui_task(void *arg) {
       continue;
     }
 
-    display_clear(COLOR_BLACK);
-#if BOARD_DISPLAY_SSD1306
-    oled_draw(held);
-#else
-    ui_draw_header();
-
-    // Pick the screen for the current state.
-    if (!config_is_provisioned()) {
-      screen_setup_draw();
-    } else {
-      screen_status_draw();
-    }
-
+    ui_frame_t frame = {.held = held, .provisioned = config_is_provisioned()};
+#if !BOARD_DISPLAY_SSD1306
+    if (frame.provisioned) screen_status_prepare();
 #endif
-
-    display_flush();
+    display_render(draw_frame, &frame);
 
     // Dim the backlight when idle (no recent activity: button or settings).
     int64_t idle_us = esp_timer_get_time() - activity_last_us();

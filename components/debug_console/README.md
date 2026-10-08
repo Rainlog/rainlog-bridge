@@ -6,7 +6,8 @@ disabled builds contain no JavaScript engine or console input task.
 The serial protocol follows MeshCore's `node_debug_js`: newline-delimited
 `js <source>`, persistent globals, `js off`, and `Result=OK/ERROR` responses.
 LILYGO uses UART0 at 115200 baud; C6 uses native USB serial/JTAG.
-Only the LILYGO has been flashed during this work.
+Both boards support debug builds. On the C6, a persistent VM can exhaust
+Wi-Fi/TLS heap headroom under load; use `js off` after diagnostics to release it.
 
 Duktape 2.7.0 replaces MeshCore's XS engine because these boards lack PSRAM.
 Built-in objects and strings reside in flash (`DUK_USE_ROM_OBJECTS` and
@@ -38,7 +39,7 @@ conflict error instead of overwriting its changes.
 | --- | --- | --- |
 | `sta_ssid`, `sta_pass` | Up to 32/64 bytes; empty STA password is allowed | Reboot |
 | `ap_ssid`, `ap_pass` | Nonempty SSID, up to 32 bytes; password 8-64 bytes | Reboot |
-| `wu_map` | Up to 8 `{gauge_id, wu_id, wu_key}` entries; numeric nonzero gauge ID | Immediately |
+| `wu_map` | Up to 8 `{device, wu_id, wu_key}` entries; Wi-Fi MAC or `radio:model:id:channel`. Legacy `{gauge_id, wu_id, wu_key}` remains supported | Immediately |
 | `rainlog_host`, `wu_host`, `ota_host` | Hostnames without scheme, port or path, up to 127 bytes | Reboot recommended |
 | `wu_update_path` | Absolute path, up to 127 bytes | Reboot (capture routes) |
 | `ota_manifest_path` | Absolute path, up to 191 bytes | Reboot recommended |
@@ -58,7 +59,7 @@ LED level 24.
 js settings.get().display_dim_pct
 js settings.set({display_dim_pct:10, display_dim_after_s:60})
 js settings.set({sta_ssid:"My WiFi", sta_pass:"password"})
-js settings.set({wu_map:[{gauge_id:123, wu_id:"TEST", wu_key:"key"}]})
+js settings.set({wu_map:[{device:"radio:0:7:0", wu_id:"TEST", wu_key:"key"}]})
 js web.reboot()
 ```
 
@@ -71,7 +72,7 @@ js web.reboot()
 | `web.scan()` / `web.scanLive()` | Cached/live SSID lists |
 | `web.test(ssid, pass)` / `web.testStatus()` | Temporary connection test; blank/omitted credentials use saved values |
 | `web.clients()` | Client list; `you` is always false on serial |
-| `web.rename(mac, name)` | Persist client name; empty name clears it |
+| `web.rename(identity, name)` | Persist device name; identity is a Wi-Fi MAC or `radio:model:id:channel`; empty name clears it |
 | `web.otaStatus()` / `web.otaCheck()` / `web.otaApply()` | OTA status, check and install (install reboots on success) |
 | `web.reboot()` | Reboot after 1.5 seconds for response flushing |
 | `web.factoryReset()` | Clear settings, stats and client names, then reboot |
@@ -102,3 +103,15 @@ Regenerate with `tools/gen-debug-duktape.sh`; source release:
 https://duktape.org/duktape-2.7.0.tar.xz . The upstream generator requires
 Python 2.7 and PyYAML, so regeneration uses a container. Firmware builds use
 only the generated C files and do not need Python 2.
+
+## Memory audit
+
+`mem` prints stored startup checkpoints, heap totals, regions, and optional
+per-task allocation totals without starting JavaScript. Startup deltas are net
+free-heap changes while services initialize, including concurrent task activity. `mem full` also lists allocated blocks. Build with
+`BOARD=c6 DEBUG_CONSOLE=1 MEMORY_AUDIT=1 ./build.sh` for per-task attribution;
+the separate audit build enables ESP-IDF heap task tracking, including deleted
+tasks. Tracking adds memory overhead, so compare against a normal debug build.
+Allocation ownership is the task that allocated the block: child task stacks
+and driver initialization can therefore appear under `main`. Do not add the
+framebuffer or task stacks again to the reported heap allocation totals.

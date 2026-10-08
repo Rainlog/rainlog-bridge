@@ -165,6 +165,15 @@ bool ap_clients_has_gauge(uint32_t gauge) {
   return found;
 }
 
+bool ap_clients_mac_for_ip(uint32_t ip4, uint8_t mac[6]) {
+  if (!s_lock || !ip4) return false;
+  xSemaphoreTake(s_lock, portMAX_DELAY);
+  const ap_client_t *client = find_by_ip(ip4);
+  if (client) memcpy(mac, client->mac, 6);
+  xSemaphoreGive(s_lock);
+  return client != NULL;
+}
+
 void ap_clients_note_upload(uint32_t ip4, uint32_t gauge_id) {
   if (s_lock == NULL || ip4 == 0) {
     return;

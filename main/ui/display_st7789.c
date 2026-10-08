@@ -33,7 +33,7 @@ esp_err_t display_panel_init(void) {
       .miso_io_num = BOARD_SPI_MISO_GPIO,
       .quadwp_io_num = -1,
       .quadhd_io_num = -1,
-      .max_transfer_sz = BOARD_DISPLAY_W * BOARD_DISPLAY_H * 2,
+      .max_transfer_sz = DISPLAY_FB_BYTES,
   };
   ESP_RETURN_ON_ERROR(spi_bus_initialize(SPI2_HOST, &bus, SPI_DMA_CH_AUTO), TAG,
                       "SPI bus");
@@ -137,9 +137,9 @@ esp_err_t display_panel_init(void) {
   return ledc_channel_config(&channel);
 }
 
-esp_err_t display_panel_flush(const display_color_t *pixels) {
-  esp_err_t err = esp_lcd_panel_draw_bitmap(s_panel, 0, 0, BOARD_DISPLAY_W,
-                                            BOARD_DISPLAY_H, pixels);
+esp_err_t display_panel_flush(const display_color_t *pixels, int y, int rows) {
+  esp_err_t err = esp_lcd_panel_draw_bitmap(s_panel, 0, y, BOARD_DISPLAY_W,
+                                            y + rows, pixels);
   if (err == ESP_OK) xSemaphoreTake(s_done, portMAX_DELAY);
   return err;
 }

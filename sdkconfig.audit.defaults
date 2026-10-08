@@ -1,0 +1,3 @@
+# Diagnostic builds only: attribute heap allocations to their allocating task.
+CONFIG_HEAP_TASK_TRACKING=y
+CONFIG_HEAP_TRACK_DELETED_TASKS=y

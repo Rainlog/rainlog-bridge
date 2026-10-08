@@ -250,13 +250,6 @@ button[type='submit']:disabled {
   color: #d97706;
 }
 /* Devices tab: one card per SoftAP client. */
-.dev {
-  border: 1px solid #dbe3ec;
-  border-radius: 12px;
-  padding: 0.9em;
-  margin: 0.9em 0;
-  background: #f7fafd;
-}
 .devmain {
   display: flex;
   align-items: center;
@@ -345,12 +338,13 @@ a.open {
   margin-top: 0.25em;
 }
 
-#radioDeviceList {
+#radioDeviceList,
+#devList {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 0.8em;
 }
-.radio-card {
+.device-card {
   min-width: 0;
   padding: 0.8em;
   border: 1px solid #e2e9f2;
@@ -358,18 +352,10 @@ a.open {
   background: #fafcfe;
   overflow-wrap: anywhere;
 }
-.radio-card h4 {
+.device-card h4 {
   margin: 0 0 0.5em;
 }
-.radio-card .radio-row {
-  border: 0;
-  padding: 0;
-  margin: 0;
-  min-width: 0;
-}
-.radio-card .mini {
-  width: 100%;
-}
+
 .radio-empty {
   grid-column: 1 / -1;
 }
@@ -401,7 +387,9 @@ a.open {
   color: #667;
 }
 
-input, select, button {
+input,
+select,
+button {
   font-family: inherit;
 }
 
@@ -418,4 +406,110 @@ input, select, button {
   cursor: pointer;
   font-weight: 600;
   color: #1668c8;
+}
+
+.radio-signal {
+  margin-left: auto;
+  flex-shrink: 0;
+  color: #667;
+  font-size: 0.75em;
+  white-space: nowrap;
+}
+.radio-signal-bars {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 16px;
+}
+.radio-signal-bars i {
+  width: 4px;
+  background: #c6cfd9;
+  height: 4px;
+}
+.radio-signal-bars i:nth-child(2) {
+  height: 8px;
+}
+.radio-signal-bars i:nth-child(3) {
+  height: 12px;
+}
+.radio-signal-bars i:nth-child(4) {
+  height: 16px;
+}
+.radio-signal-bars i.active {
+  background: #1668c8;
+}
+
+.sensor-heading-text {
+  min-width: 0;
+  flex: 1;
+}
+.device-card .sensor-detail {
+  margin: 0.5em 0;
+}
+.device-stats:empty,
+.device-management:empty {
+  display: none;
+}
+.device-actions {
+  margin-top: 0.6em;
+}
+.device-card .uploader-button {
+  width: auto;
+  padding: 0.65em 0.8em;
+  font-size: 0.9em;
+}
+.uploader-panel {
+  border: 1px solid #dbe3ec;
+  border-radius: 10px;
+  padding: 0.8em;
+  margin: 0.8em 0 0;
+  min-width: 0;
+}
+.uploader-panel legend,
+.uploader-panel h4 {
+  color: #1668c8;
+  font-size: 1em;
+  font-weight: 600;
+}
+.uploader-panel label {
+  margin-top: 0.7em;
+}
+.device-card .you {
+  display: inline-block;
+  margin-left: 0.5em;
+}
+.sensor-heading {
+  flex-wrap: wrap;
+}
+
+.device-card > .wu-uploader-action {
+  margin-top: 0.8em;
+}
+
+.device-name {
+  display: flex;
+  align-items: center;
+  gap: 0.35em;
+}
+.device-name h4 {
+  margin: 0;
+}
+.name-edit {
+  background: transparent;
+  color: #176ac5;
+  padding: 0.3em;
+  flex: none;
+  border-radius: 6px;
+}
+.name-edit svg {
+  display: block;
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linejoin: round;
+}
+.name-edit:hover {
+  background: #e8f0fb;
 }

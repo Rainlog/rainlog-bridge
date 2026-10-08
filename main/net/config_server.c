@@ -3,8 +3,10 @@
 #include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 #include "ap_clients.h"
+#include "nvs.h"
 #include "capture_server.h"
 #include "config.h"
 #include "config_store.h"
@@ -211,6 +213,27 @@ static esp_err_t favicon_handler(httpd_req_t *req) {
 // returned (the page shows it behind a Show toggle) - it is a per-station
 // upload key, not a network credential, and the page itself is already gated
 // (SoftAP side or signed-in LAN session).
+#if RAINLOG_RADIO
+// Sensor names use protocol identity, independent of uploader assignments.
+static void radio_name_key(unsigned model, unsigned id, unsigned channel,
+                           char key[16]) {
+  snprintf(key, 16, "r%u_%u_%u", model, id, channel);
+}
+static void radio_name_json(unsigned model, unsigned id, unsigned channel,
+                            char escaped[198]) {
+  char key[16], name[33] = {0};
+  radio_name_key(model, id, channel, key);
+  nvs_handle_t handle;
+  if (nvs_open("radio_names", NVS_READONLY, &handle) == ESP_OK) {
+    size_t size = sizeof(name);
+    if (nvs_get_str(handle, key, name, &size) != ESP_OK) name[0] = 0;
+    nvs_close(handle);
+  }
+  json_escape(name, escaped, 198);
+}
+
+#endif
+
 char *config_server_config_json(void) {
   const bridge_config_t *cfg = config_get();
   // Worst case every byte escapes to "\u00XX" (6x).
@@ -233,14 +256,16 @@ char *config_server_config_json(void) {
                    sta_ssid, ap_ssid,
                    ap_pass_is_default(cfg->ap_pass) ? "true" : "false", ap_ip);
   for (uint8_t i = 0; i < cfg->wu_map_count && o > 0 && o < PAGE_MAX; i++) {
+    char device[sizeof(cfg->wu_map[i].device) * 6];
+    json_escape(cfg->wu_map[i].device, device, sizeof(device));
     char wu_id[sizeof(cfg->wu_map[i].wu_id) * 6];
     char wu_key[sizeof(cfg->wu_map[i].wu_key) * 6];
     json_escape(cfg->wu_map[i].wu_id, wu_id, sizeof(wu_id));
     json_escape(cfg->wu_map[i].wu_key, wu_key, sizeof(wu_key));
     o += snprintf(json + o, PAGE_MAX - o,
-                  "%s{\"gauge_id\":%lu,\"wu_id\":\"%s\",\"wu_key\":\"%s\"}",
+                  "%s{\"gauge_id\":%lu,\"wu_id\":\"%s\",\"wu_key\":\"%s\",\"device\":\"%s\"}",
                   i ? "," : "", (unsigned long)cfg->wu_map[i].gauge_id, wu_id,
-                  wu_key);
+                  wu_key, device);
   }
 #if RAINLOG_RADIO
   if (o > 0 && o < PAGE_MAX)
@@ -252,13 +277,15 @@ char *config_server_config_json(void) {
                   wifi_link_ap_enabled() ? "true" : "false");
   for (unsigned i = 0; i < cfg->radio_map_count && o > 0 && o < PAGE_MAX; i++) {
     const radio_mapping_t *m = &cfg->radio_map[i];
+    char name[198];
+    radio_name_json(m->model, m->sensor_id, (unsigned char)m->channel, name);
     char key[sizeof(m->rainlog_key) * 6];
     json_escape(m->rainlog_key, key, sizeof(key));
     o += snprintf(json + o, PAGE_MAX - o,
                   "%s{\"model\":%u,\"sensor_id\":%lu,\"channel\":%u,\"gauge_"
-                  "id\":%lu,\"rainlog_key\":\"%s\"}",
+                  "id\":%lu,\"rainlog_key\":\"%s\",\"name\":\"%s\"}",
                   i ? "," : "", m->model, (unsigned long)m->sensor_id,
-                  (unsigned char)m->channel, (unsigned long)m->gauge_id, key);
+                  (unsigned char)m->channel, (unsigned long)m->gauge_id, key, name);
   }
 #endif
   if (o > 0 && o < PAGE_MAX) o += snprintf(json + o, PAGE_MAX - o, "]}");
@@ -296,14 +323,17 @@ char *config_server_radio_json(void) {
     const weather_packet_t *p = &sensors[i].reading.packet;
     const radio_mapping_t *m =
         config_find_radio_mapping(p->model, p->id, p->channel);
+    char name[198];
+    radio_name_json(p->model, p->id, (unsigned char)p->channel, name);
     o += snprintf(
         json + o, PAGE_MAX - o,
         "%s{\"model\":%u,\"sensor_id\":%u,\"channel\":%u,\"age_s\":%"
-        "lld,\"gauge_id\":%lu,\"has_rain\":%s,\"rain_raw\":%u,\"packets\":%lu}",
+        "lld,\"gauge_id\":%lu,\"has_rain\":%s,\"rain_raw\":%u,\"packets\":%lu,\"rssi_dbm\":%.1f,\"name\":\"%s\"}",
         seen++ ? "," : "", p->model, p->id, (unsigned char)p->channel,
         (long long)((now - sensors[i].reading.received_us) / 1000000),
         m ? (unsigned long)m->gauge_id : 0, p->has_rain ? "true" : "false",
-        p->rain_raw, (unsigned long)sensors[i].packets);
+        p->rain_raw, (unsigned long)sensors[i].packets,
+        sensors[i].reading.rssi_dbm, name);
   }
   if (o > 0 && o < PAGE_MAX) o += snprintf(json + o, PAGE_MAX - o, "]}");
   if (o < 0 || o >= PAGE_MAX) {
@@ -476,9 +506,8 @@ esp_err_t config_server_save_form(const char *body, const char **error) {
     snprintf(cfg.ap_pass, sizeof(cfg.ap_pass), "%s", tmp);
   }
 
-  // WU map rows are submitted as rl<i>/wu<i>/wk<i> for i in 0..WU_MAP_MAX-1.
-  // A row with a gauge id and a WU station id is kept; a blank wu key reuses
-  // the key already stored for that gauge id (matched below).
+  // WU rows submit wd<i>/wu<i>/wk<i>, with rl<i> retained for legacy clients.
+  // Blank keys preserve the matching device or legacy gauge credential.
   const bridge_config_t *prev = config_get();
   wu_mapping_t old[WU_MAP_MAX];
   uint8_t old_n = prev->wu_map_count;
@@ -487,28 +516,36 @@ esp_err_t config_server_save_form(const char *body, const char **error) {
   memset(cfg.wu_map, 0, sizeof(cfg.wu_map));
   uint8_t n = 0;
   for (int i = 0; i < WU_MAP_MAX; i++) {
-    char name_rl[8], name_wu[8], name_wk[8];
+    char name_rl[8], name_wu[8], name_wk[8], name_device[16];
+    snprintf(name_device, sizeof(name_device), "wd%d", i);
     snprintf(name_rl, sizeof(name_rl), "rl%d", i);  // rainlog gauge id
     snprintf(name_wu, sizeof(name_wu), "wu%d", i);  // WU station id
     snprintf(name_wk, sizeof(name_wk), "wk%d", i);  // WU key
-    char gid[24], wuid[64], wukey[65];
+    char gid[24], wuid[64], wukey[65], device[40] = {0};
+    http_util_form_get(body, name_device, device, sizeof(device));
+    if (*device && !config_device_identity_valid(device)) {
+      *error = "invalid WU device identity";
+      return ESP_ERR_INVALID_ARG;
+    }
     bool has_gid = http_util_form_get(body, name_rl, gid, sizeof(gid));
     bool has_wu = http_util_form_get(body, name_wu, wuid, sizeof(wuid));
     // The field takes the station id as Rainlog shows it ("Rainlog12345") or
     // the bare gauge number.
     uint32_t gauge = has_gid ? config_parse_gauge_id(gid, false) : 0;
-    if (gauge == 0 || !has_wu || wuid[0] == '\0') {
+    if ((!*device && gauge == 0) || !has_wu || wuid[0] == '\0') {
       continue;  // skip blank/incomplete rows
     }
     wu_mapping_t *e = &cfg.wu_map[n];
     e->gauge_id = gauge;
+    snprintf(e->device, sizeof(e->device), "%s", device);
     snprintf(e->wu_id, sizeof(e->wu_id), "%s", wuid);
     if (http_util_form_get(body, name_wk, wukey, sizeof(wukey)) && wukey[0]) {
       snprintf(e->wu_key, sizeof(e->wu_key), "%s", wukey);
     } else {
       // Blank key: carry over the stored key for this gauge id, if any.
       for (uint8_t j = 0; j < old_n; j++) {
-        if (old[j].gauge_id == gauge) {
+        if ((*device && !strcasecmp(old[j].device, device)) ||
+            (!*old[j].device && gauge && old[j].gauge_id == gauge)) {
           snprintf(e->wu_key, sizeof(e->wu_key), "%s", old[j].wu_key);
           break;
         }
@@ -698,14 +735,33 @@ static bool parse_mac(const char *s, uint8_t out[6]) {
   return sscanf(s, "%2hhx:%2hhx:%2hhx:%2hhx:%2hhx:%2hhx", &out[0], &out[1],
                 &out[2], &out[3], &out[4], &out[5]) == 6;
 }
-esp_err_t config_server_rename(const char *mac_string, const char *name) {
+esp_err_t config_server_rename(const char *device_identity, const char *name) {
+#if RAINLOG_RADIO
+  if (!strncmp(device_identity, "radio:", 6)) {
+    unsigned model, id, channel;
+    int end = 0;
+    if (sscanf(device_identity, "radio:%u:%u:%u%n", &model, &id, &channel, &end) != 3 ||
+        device_identity[end] || model > WEATHER_ACURITE_5N1 || id > UINT16_MAX ||
+        channel > UINT8_MAX || strlen(name) > 32) return ESP_ERR_INVALID_ARG;
+    char key[16];
+    radio_name_key(model, id, channel, key);
+    nvs_handle_t handle;
+    esp_err_t err = nvs_open("radio_names", NVS_READWRITE, &handle);
+    if (err != ESP_OK) return err;
+    err = *name ? nvs_set_str(handle, key, name) : nvs_erase_key(handle, key);
+    if (err == ESP_ERR_NVS_NOT_FOUND) err = ESP_OK;
+    if (err == ESP_OK) err = nvs_commit(handle);
+    nvs_close(handle);
+    return err;
+  }
+#endif
   uint8_t mac[6];
-  if (!parse_mac(mac_string, mac) || strlen(name) > 32)
+  if (!parse_mac(device_identity, mac) || strlen(name) > 32)
     return ESP_ERR_INVALID_ARG;
   return ap_clients_set_name(mac, name);
 }
 
-// POST /rename: set the user-given name for a device (form fields mac, name;
+// POST /rename: set a Wi-Fi or radio device name (form fields mac, name;
 // an empty or absent name clears it). Persisted across reboots.
 static esp_err_t rename_handler(httpd_req_t *req) {
   if (reject_unauthorized(req)) {
@@ -716,7 +772,7 @@ static esp_err_t rename_handler(httpd_req_t *req) {
     httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad form");
     return ESP_OK;
   }
-  char mac_str[24];
+  char mac_str[40];
   char name[33];
   bool has_mac = http_util_form_get(body, "mac", mac_str, sizeof(mac_str));
   if (!http_util_form_get(body, "name", name, sizeof(name))) {
@@ -727,7 +783,7 @@ static esp_err_t rename_handler(httpd_req_t *req) {
   esp_err_t err =
       has_mac ? config_server_rename(mac_str, name) : ESP_ERR_INVALID_ARG;
   if (err == ESP_ERR_INVALID_ARG) {
-    httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad mac");
+    httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad device identity");
     return ESP_OK;
   }
   if (err != ESP_OK) {

@@ -6,7 +6,13 @@
 
 #include "display_panel.h"
 #include "oled_logo.h"
-static display_color_t frame[DISPLAY_FB_BYTES / sizeof(display_color_t)];
+#if BOARD_DISPLAY_SSD1306
+static display_color_t frame[DISPLAY_W * DISPLAY_H / 8];
+#else
+static display_color_t frame[DISPLAY_W * DISPLAY_H];
+#endif
+static unsigned transfers;
+static uint32_t frame_hash = 2166136261u;
 size_t framebuffer_allocation;
 static display_color_t pixel_at(int index) {
 #if BOARD_DISPLAY_SSD1306
@@ -19,14 +25,87 @@ static display_color_t pixel_at(int index) {
 static int brightness;
 
 esp_err_t display_panel_init(void) { return ESP_OK; }
-esp_err_t display_panel_flush(const display_color_t *pixels) {
+esp_err_t display_panel_flush(const display_color_t *pixels, int y, int rows) {
+  assert(y >= 0 && rows > 0 && y + rows <= DISPLAY_H);
+#if BOARD_DISPLAY_SSD1306
+  assert(y == 0 && rows == DISPLAY_H);
   memcpy(frame, pixels, sizeof(frame));
+#else
+  assert(y % DISPLAY_STRIP_ROWS == 0 && rows <= DISPLAY_STRIP_ROWS);
+  memcpy(frame + y * DISPLAY_W, pixels, DISPLAY_W * rows * sizeof(*pixels));
+#endif
+  transfers++;
   return ESP_OK;
 }
 esp_err_t display_panel_brightness(uint8_t percent) {
   brightness = percent;
   return ESP_OK;
 }
+
+// Replay the same drawing fixture for each strip, preserving the original
+// primitive assertions below and supporting incremental OLED draws.
+typedef struct {
+  int kind, x, y, w, h, scale;
+  display_color_t color;
+  const void *data;
+} operation_t;
+static operation_t operations[128];
+static unsigned operation_count;
+static void record(operation_t op) {
+  assert(operation_count < sizeof(operations) / sizeof(operations[0]));
+  operations[operation_count++] = op;
+}
+static void record_clear(display_color_t color) {
+  operation_count = 0;
+  record((operation_t){.kind=0, .color=color});
+}
+static void record_rect(int x, int y, int w, int h, display_color_t color) {
+  record((operation_t){.kind=1, .x=x, .y=y, .w=w, .h=h, .color=color});
+}
+static void record_text(int x,int y,int scale,display_color_t color,const char *text) {
+  record((operation_t){.kind=2,.x=x,.y=y,.scale=scale,.color=color,.data=text});
+}
+static void record_bold(int x,int y,int scale,display_color_t color,const char *text) {
+  record((operation_t){.kind=3,.x=x,.y=y,.scale=scale,.color=color,.data=text});
+}
+static void record_rgba(int x,int y,int w,int h,const uint8_t *data) {
+  record((operation_t){.kind=4,.x=x,.y=y,.w=w,.h=h,.data=data});
+}
+static void record_mono(int x,int y,int w,int h,const uint8_t *data) {
+  record((operation_t){.kind=5,.x=x,.y=y,.w=w,.h=h,.data=data});
+}
+static void replay(void *unused) {
+  (void)unused;
+  for (unsigned i=0;i<operation_count;i++) {
+    const operation_t *op=&operations[i];
+    switch(op->kind) {
+      case 0: display_clear(op->color); break;
+      case 1: display_fill_rect(op->x,op->y,op->w,op->h,op->color); break;
+      case 2: display_text(op->x,op->y,op->scale,op->color,op->data); break;
+      case 3: display_text_bold(op->x,op->y,op->scale,op->color,op->data); break;
+      case 4: display_blit_rgba(op->x,op->y,op->w,op->h,op->data); break;
+      case 5: display_blit_mono(op->x,op->y,op->w,op->h,op->data); break;
+    }
+  }
+}
+static void render_fixture(void) {
+  unsigned before = transfers;
+  display_render(replay, NULL);
+#if BOARD_DISPLAY_SSD1306
+  assert(transfers-before == 1);
+#else
+  assert(transfers-before == (DISPLAY_H+DISPLAY_STRIP_ROWS-1)/DISPLAY_STRIP_ROWS);
+#endif
+  const uint8_t *bytes=(const uint8_t *)frame;
+  for (unsigned i=0;i<sizeof(frame);i++) frame_hash=(frame_hash^bytes[i])*16777619u;
+}
+#define display_clear record_clear
+#define display_fill_rect record_rect
+#define display_text record_text
+#define display_text_bold record_bold
+#define display_blit_rgba record_rgba
+#define display_blit_mono record_mono
+#define display_flush render_fixture
 
 int main(void) {
   // Drawing before init must be harmless (a headless device can skip init).
@@ -164,6 +243,18 @@ int main(void) {
   display_flush();
   for (unsigned i = 0; i < sizeof(frame); i++) assert(frame[i] == 0);
 #endif
-  puts("Display rendering and pixel format checks passed");
+  // Exercise scaled text, opaque/transparent images and rectangles across
+  // every 16-row boundary, plus the bottom clipping boundary.
+  const uint8_t pixels[] = {255,0,0,255, 0,255,0,39, 0,0,255,255, 255,255,255,255};
+  for (int boundary=16;boundary<=DISPLAY_H;boundary+=16) {
+    display_clear(COLOR_BLACK);
+    display_fill_rect(-2,boundary-3,DISPLAY_W+4,7,COLOR_BLUE);
+    display_text(1,boundary-5,2,COLOR_WHITE,"Abg");
+    display_text_bold(60,boundary-1,1,COLOR_RED,"TEST");
+    display_blit_rgba(DISPLAY_W-1,boundary-1,2,2,pixels);
+    display_blit_mono(100,boundary-4,2,8,mono);
+    display_flush();
+  }
+  printf("Display rendering and pixel format checks passed: %08x\n",frame_hash);
   return 0;
 }

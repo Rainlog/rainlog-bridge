@@ -156,6 +156,19 @@ int main(void) {
   cfg.wu_map_count = 2;
   assert(config_validate(&cfg));
   cfg = *config_get();
+  cfg.wu_map[1] = (wu_mapping_t){.device="radio:0:7:0", .wu_id="RADIO", .wu_key="test-key"};
+  cfg.wu_map_count = 2;
+  assert(!config_validate(&cfg) && !config_update(&cfg));
+  config_load();
+  assert(config_find_wu_device("radio:0:7:0", 123) == &config_get()->wu_map[1]);
+  assert(config_find_wu_device("01:02:03:04:05:06", 123) == &config_get()->wu_map[0]);
+  assert(!config_find_wu_device("radio:1:7:67", 0));
+  cfg.wu_map[0] = cfg.wu_map[1];
+  assert(config_validate(&cfg));
+  assert(!config_device_identity_valid("radio:0:70000:0"));
+  assert(!config_device_identity_valid("radio:0:7:0junk"));
+  assert(!config_device_identity_valid("01:02:03:04:05:GG"));
+  cfg = *config_get();
   cfg.display_dim_pct = 13;
   fail_commit = 1;
   assert(config_update(&cfg) != 0 && config_get()->display_dim_pct == 12);
@@ -177,4 +190,19 @@ int main(void) {
   assert(config_clear() == 0);
   config_load();
   assert(!config_is_provisioned() && config_get()->display_dim_pct == 6);
+  // A real pre-device-identity blob must survive upgrade and a v2 round trip.
+  count = 0;
+  typedef struct { uint32_t gauge_id; char wu_id[64], wu_key[65]; } old_mapping_t;
+  old_mapping_t legacy[WU_MAP_MAX] = {{.gauge_id=987, .wu_id="OLD", .wu_key="old-key"}};
+  put("wu_map", legacy, sizeof(legacy));
+  nvs_set_u8(1, "wu_n", 1);
+  config_load();
+  assert(config_get()->wu_map_count == 1);
+  const wu_mapping_t *old = config_find_wu_mapping(987);
+  assert(old && !strcmp(old->wu_id, "OLD") && !strcmp(old->wu_key, "old-key") && !*old->device);
+  cfg = *config_get();
+  assert(!config_update(&cfg));
+  config_load();
+  old = config_find_wu_mapping(987);
+  assert(old && !strcmp(old->wu_key, "old-key"));
 }

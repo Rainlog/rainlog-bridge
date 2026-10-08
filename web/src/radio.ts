@@ -1,5 +1,5 @@
 import tippingBucketIcon from './icons/tipping-bucket.svg';
-import weatherStationIcon from './icons/weather-station.svg';
+import { createDeviceCard, renderSignal, uploaderButton } from './device-card';
 
 interface RadioMapping {
   model: number;
@@ -7,6 +7,7 @@ interface RadioMapping {
   channel: number;
   gauge_id: number;
   rainlog_key: string;
+  name?: string;
 }
 interface RadioConfig {
   radio_enabled?: boolean;
@@ -15,6 +16,7 @@ interface RadioConfig {
 }
 interface RadioSensor extends Omit<RadioMapping, 'rainlog_key'> {
   age_s: number;
+  rssi_dbm?: number;
   has_rain?: boolean;
   rain_raw?: number;
   packets?: number;
@@ -28,6 +30,8 @@ interface RadioStatus {
 
 export function createRadio(
   attachPasswordToggle: (input: HTMLInputElement) => void,
+  attachWuUploader: (card: HTMLElement, gauge: () => number) => void,
+  refreshUploaders: () => void,
 ) {
   const rows = document.getElementById('radioDeviceList')!;
   const status = document.getElementById('radioStatus')!;
@@ -36,6 +40,7 @@ export function createRadio(
   const names = ['La Crosse TX5U', 'AcuRite Iris'];
   let sensors: RadioSensor[] = [];
   let receiving = false;
+  const sensorNames = new Map<string, string>();
   // TX5U normally transmits about every 51 seconds. Five minutes misses
   // several expected reports without flagging a single lost packet.
   const TX5U_QUIET_SECONDS = 300;
@@ -44,7 +49,10 @@ export function createRadio(
     if (rows.querySelectorAll('.radio-row').length >= 8) return;
     const card = sensorCard(mapping);
     const row = document.createElement('fieldset');
-    row.className = 'radio-row';
+    row.className = 'radio-row uploader-panel';
+    const legend = document.createElement('legend');
+    legend.textContent = 'Rainlog Uploader';
+    row.append(legend);
     const identity = (name: string, value: string): HTMLInputElement => {
       const field = document.createElement('input');
       field.type = 'hidden';
@@ -146,7 +154,7 @@ export function createRadio(
     const remove = document.createElement('button');
     remove.type = 'button';
     remove.className = 'mini';
-    remove.textContent = 'Remove mapping';
+    remove.textContent = 'Remove Rainlog Uploader';
     remove.addEventListener('click', () => {
       row.remove();
       validateGaugeAssignments();
@@ -157,17 +165,25 @@ export function createRadio(
     card.append(row);
     numberRows();
     refreshSensorPickers();
+    refreshUploaders();
   }
   const wifiGauges = new Set<number>();
   function validateGaugeAssignments(): void {
-    const gauges = Array.from(rows.querySelectorAll<HTMLInputElement>('[data-field=gauge]'));
-    const id = (input: HTMLInputElement) => Number(input.value.replace(/^Rainlog/i, ''));
+    const gauges = Array.from(
+      rows.querySelectorAll<HTMLInputElement>('[data-field=gauge]'),
+    );
+    const id = (input: HTMLInputElement) =>
+      Number(input.value.replace(/^Rainlog/i, ''));
     gauges.forEach((input) => {
       const gauge = id(input);
-      input.setCustomValidity(wifiGauges.has(gauge)
-        ? 'This Rainlog gauge is already assigned to a Wi-Fi device.'
-        : gauge && gauges.some((other) => other !== input && id(other) === gauge)
-          ? 'This Rainlog gauge is already assigned to another radio sensor.' : '');
+      input.setCustomValidity(
+        wifiGauges.has(gauge)
+          ? 'This Rainlog gauge is already assigned to a Wi-Fi device.'
+          : gauge &&
+              gauges.some((other) => other !== input && id(other) === gauge)
+            ? 'This Rainlog gauge is already assigned to another radio sensor.'
+            : '',
+      );
     });
   }
   rows.addEventListener('input', validateGaugeAssignments);
@@ -274,26 +290,43 @@ export function createRadio(
       (card) => (card as HTMLElement).dataset.sensor === identity,
     ) as HTMLElement | undefined;
     if (!card) {
-      card = document.createElement('article');
-      card.className = 'radio-card';
+      card = createDeviceCard('radio-card', identity);
       card.dataset.sensor = identity;
-      const icon = document.createElement('div');
-      icon.className = 'sensor-icon';
-      icon.setAttribute('aria-hidden', 'true');
-      icon.innerHTML =
-        sensor.model === 0 ? tippingBucketIcon : weatherStationIcon;
-      const title = document.createElement('h4');
-      title.textContent = names[sensor.model] ?? 'Weather sensor';
-      const identityLabel = document.createElement('p');
-      identityLabel.className = 'sensor-identity';
-      const detail = document.createElement('p');
-      detail.className = 'small sensor-detail';
-      const heading = document.createElement('div');
-      heading.className = 'sensor-heading';
-      const headingText = document.createElement('div');
-      headingText.append(title, identityLabel);
-      heading.append(icon, headingText);
-      card.append(heading, detail);
+      card.querySelector('h4')!.textContent =
+        names[sensor.model] ?? 'Weather sensor';
+      if (sensor.model === 0)
+        card.querySelector('.sensor-icon')!.innerHTML = tippingBucketIcon;
+      attachWuUploader(card, () =>
+        Number(
+          card!
+            .querySelector<HTMLInputElement>('[data-field=gauge]')
+            ?.value.replace(/^Rainlog/i, '') ?? 0,
+        ),
+      );
+      card.querySelector<HTMLButtonElement>('.name-edit')!.onclick =
+        async () => {
+          const identity = card!.dataset.sensor!;
+          const entered = prompt(
+            'Name for this device (empty to clear):',
+            sensorNames.get(identity) ?? '',
+          );
+          if (entered === null) return;
+          try {
+            const response = await fetch('/rename', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+              body: new URLSearchParams({
+                mac: `radio:${identity}`,
+                name: entered.trim().slice(0, 32),
+              }),
+            });
+            if (!response.ok) throw new Error('Unable to save device name.');
+            sensorNames.set(identity, entered.trim().slice(0, 32));
+            renderSensors();
+          } catch {
+            alert('Unable to save device name.');
+          }
+        };
       rows.append(card);
     }
     card.querySelector('.sensor-identity')!.textContent =
@@ -303,7 +336,8 @@ export function createRadio(
   function renderSensors(): void {
     // Keep mapping fields in place while polling so edits and focus survive.
     for (const card of Array.from(rows.children)) {
-      if (!card.querySelector('.radio-row')) card.remove();
+      if (!card.querySelector('.radio-row') && !card.querySelector('.wurow'))
+        card.remove();
     }
     for (const row of Array.from(rows.querySelectorAll('.radio-row'))) {
       const value = (name: string) =>
@@ -315,31 +349,46 @@ export function createRadio(
       };
       const card = row.parentElement!;
       card.dataset.sensor = sensorIdentity(sensor);
-      card.querySelector('h4')!.textContent = names[sensor.model];
+      card.querySelector('h4')!.textContent =
+        sensorNames.get(sensorIdentity(sensor)) || names[sensor.model];
       card.querySelector('.sensor-identity')!.textContent =
         `ID ${sensor.sensor_id}${sensor.channel ? `, channel ${String.fromCharCode(sensor.channel)}` : ''}`;
       const seen = sensors.find(
         (seen) => sensorIdentity(seen) === sensorIdentity(sensor),
       );
+      renderSignal(card, seen?.rssi_dbm, true, seen?.age_s);
       card.querySelector('.sensor-detail')!.textContent = seen
         ? sensorDetail(seen)
         : 'Not seen this boot';
     }
     sensors.forEach((sensor) => {
       const card = sensorCard(sensor);
+      renderSignal(card, sensor.rssi_dbm, true, sensor.age_s);
       card.querySelector('.sensor-detail')!.textContent = sensorDetail(sensor);
-      if (!card.querySelector('.radio-row')) {
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.className = 'mini mapping-action';
-        button.textContent = 'Add Rainlog mapping';
-        button.addEventListener('click', () =>
+      if (
+        !card.querySelector('.radio-row') &&
+        !card.querySelector('.mapping-action')
+      ) {
+        const button = uploaderButton('Add Rainlog Uploader', () =>
           addRow({ ...sensor, gauge_id: 0, rainlog_key: '' }),
         );
-        card.append(button);
+        button.classList.add('mapping-action');
+        card.querySelector('.device-actions')!.prepend(button);
       }
     });
+    for (const card of Array.from(
+      rows.querySelectorAll<HTMLElement>('.radio-card'),
+    )) {
+      const identity = card.dataset.sensor!;
+      const model = Number(identity.split(':')[0]);
+      const name = sensorNames.get(identity);
+      card.querySelector('h4')!.textContent = name || names[model];
+      const parts = identity.split(':');
+      card.querySelector('.sensor-identity')!.textContent =
+        `${name ? names[model] + ' · ' : ''}ID ${parts[1]}${Number(parts[2]) ? ', channel ' + String.fromCharCode(Number(parts[2])) : ''}`;
+    }
     refreshSensorPickers();
+    refreshUploaders();
     if (!rows.children.length) {
       const empty = document.createElement('p');
       empty.className = 'radio-empty hint';
@@ -366,6 +415,9 @@ export function createRadio(
       deviceStatus.textContent = status.textContent;
       receiving = data.available && data.receiving;
       sensors = data.sensors;
+      sensors.forEach((sensor) =>
+        sensorNames.set(sensorIdentity(sensor), sensor.name ?? ''),
+      );
       renderSensors();
     } catch {
       status.textContent = 'Unable to read radio status.';
@@ -381,7 +433,10 @@ export function createRadio(
       (
         document.getElementById('wifiInterceptionEnabled') as HTMLInputElement
       ).checked = config.wifi_interception_enabled ?? false;
-      (config.radio_map ?? []).forEach(addRow);
+      (config.radio_map ?? []).forEach((mapping) => {
+        sensorNames.set(sensorIdentity(mapping), mapping.name ?? '');
+        addRow(mapping);
+      });
       renderSensors();
     },
     setWifiGauges(ids: number[]): void {

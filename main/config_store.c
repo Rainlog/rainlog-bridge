@@ -1,6 +1,7 @@
 #include "config_store.h"
 
 #include <errno.h>
+#include <ctype.h>
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -116,11 +117,16 @@ const char *config_validate(const bridge_config_t *cfg) {
   if (cfg->wu_map_count > WU_MAP_MAX) return "too many WU mappings";
   for (unsigned i = 0; i < cfg->wu_map_count; i++) {
     const wu_mapping_t *m = &cfg->wu_map[i];
-    if (!m->gauge_id || !memchr(m->wu_id, 0, sizeof(m->wu_id)) ||
-        !m->wu_id[0] || !memchr(m->wu_key, 0, sizeof(m->wu_key)))
-      return "invalid WU mapping";
-    for (unsigned j = 0; j < i; j++)
-      if (cfg->wu_map[j].gauge_id == m->gauge_id) return "duplicate gauge id";
+    if (!memchr(m->device, 0, sizeof(m->device)) ||
+        (*m->device ? !config_device_identity_valid(m->device) : !m->gauge_id) ||
+        !memchr(m->wu_id, 0, sizeof(m->wu_id)) || !m->wu_id[0] ||
+        !memchr(m->wu_key, 0, sizeof(m->wu_key))) return "invalid WU mapping";
+    for (unsigned j = 0; j < i; j++) {
+      const wu_mapping_t *other = &cfg->wu_map[j];
+      if (*m->device ? !strcasecmp(other->device, m->device) :
+          !*other->device && other->gauge_id == m->gauge_id)
+        return "duplicate WU source";
+    }
   }
   return NULL;
 }
@@ -176,12 +182,28 @@ void config_load(void) {
       nvs_get_str(h, field_keys[i], value, &length);
     }
   }
-  // WU map: a single blob of wu_mapping_t entries.
+  // v2 has device identities; decode the old layout explicitly on first boot.
   size_t blob_len = sizeof(s_cfg.wu_map);
-  if (nvs_get_blob(h, "wu_map", s_cfg.wu_map, &blob_len) == ESP_OK) {
+  if (nvs_get_blob(h, "wu_map_v2", s_cfg.wu_map, &blob_len) == ESP_OK &&
+      blob_len == sizeof(s_cfg.wu_map)) {
     uint8_t count = 0;
-    nvs_get_u8(h, "wu_n", &count);
+    nvs_get_u8(h, "wu_n_v2", &count);
     s_cfg.wu_map_count = count <= WU_MAP_MAX ? count : WU_MAP_MAX;
+  } else {
+    typedef struct { uint32_t gauge_id; char wu_id[64], wu_key[65]; } legacy_wu_t;
+    legacy_wu_t old[WU_MAP_MAX] = {0};
+    blob_len = sizeof(old);
+    memset(s_cfg.wu_map, 0, sizeof(s_cfg.wu_map));
+    if (nvs_get_blob(h, "wu_map", old, &blob_len) == ESP_OK && blob_len == sizeof(old)) {
+      uint8_t count = 0;
+      nvs_get_u8(h, "wu_n", &count);
+      s_cfg.wu_map_count = count <= WU_MAP_MAX ? count : WU_MAP_MAX;
+      for (unsigned i = 0; i < s_cfg.wu_map_count; i++) {
+        s_cfg.wu_map[i].gauge_id = old[i].gauge_id;
+        memcpy(s_cfg.wu_map[i].wu_id, old[i].wu_id, sizeof(old[i].wu_id));
+        memcpy(s_cfg.wu_map[i].wu_key, old[i].wu_key, sizeof(old[i].wu_key));
+      }
+    }
   }
 #if RAINLOG_RADIO
   size_t radio_len = sizeof(s_cfg.radio_map);
@@ -209,6 +231,30 @@ void config_load(void) {
 
 const bridge_config_t *config_get(void) { return &s_cfg; }
 
+bool config_device_identity_valid(const char *device) {
+  unsigned model, id, channel;
+  int end = 0;
+  if (sscanf(device, "radio:%u:%u:%u%n", &model, &id, &channel, &end) == 3 &&
+      !device[end]) {
+    if (model > 1 || id > UINT16_MAX || channel > UINT8_MAX) return false;
+    char canonical[40];
+    snprintf(canonical, sizeof(canonical), "radio:%u:%u:%u", model, id, channel);
+    return !strcmp(device, canonical);
+  }
+  if (strlen(device) != 17) return false;
+  for (unsigned i = 0; i < 17; i++) {
+    if (i % 3 == 2 ? device[i] != ':' : !isxdigit((unsigned char)device[i])) return false;
+  }
+  return true;
+}
+const wu_mapping_t *config_find_wu_device(const char *device, uint32_t legacy_gauge) {
+  if (device && *device) {
+    for (unsigned i = 0; i < s_cfg.wu_map_count; i++)
+      if (!strcasecmp(s_cfg.wu_map[i].device, device)) return &s_cfg.wu_map[i];
+  }
+  return config_find_wu_mapping(legacy_gauge);
+}
+
 uint32_t config_parse_gauge_id(const char *s, bool require_prefix) {
   static const char prefix[] = "Rainlog";
   size_t plen = sizeof(prefix) - 1;
@@ -232,7 +278,7 @@ const wu_mapping_t *config_find_wu_mapping(uint32_t gauge_id) {
     return NULL;
   }
   for (uint8_t i = 0; i < s_cfg.wu_map_count; i++) {
-    if (s_cfg.wu_map[i].gauge_id == gauge_id) {
+    if (!s_cfg.wu_map[i].device[0] && s_cfg.wu_map[i].gauge_id == gauge_id) {
       return &s_cfg.wu_map[i];
     }
   }
@@ -254,8 +300,8 @@ esp_err_t config_update(const bridge_config_t *cfg) {
                      : nvs_set_str(h, field_keys[i], value);
   }
   if (err == ESP_OK)
-    err = nvs_set_blob(h, "wu_map", cfg->wu_map, sizeof(cfg->wu_map));
-  if (err == ESP_OK) err = nvs_set_u8(h, "wu_n", cfg->wu_map_count);
+    err = nvs_set_blob(h, "wu_map_v2", cfg->wu_map, sizeof(cfg->wu_map));
+  if (err == ESP_OK) err = nvs_set_u8(h, "wu_n_v2", cfg->wu_map_count);
 #if RAINLOG_RADIO
   if (err == ESP_OK)
     err = nvs_set_blob(h, "radio_map", cfg->radio_map, sizeof(cfg->radio_map));

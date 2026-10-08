@@ -12,6 +12,9 @@
 #include "duktape.h"
 #include "esp_app_desc.h"
 #include "esp_heap_caps.h"
+#if CONFIG_HEAP_TASK_TRACKING
+#include "esp_heap_task_info.h"
+#endif
 #include "esp_log.h"
 #include "esp_system.h"
 #include "esp_timer.h"
@@ -31,7 +34,8 @@
 static const char *TAG = "debug";
 static console_line_t input_line;
 
-// A bounded allocator keeps debug expressions from exhausting bridge memory.
+// Bound VM payload allocations; network headroom and allocation overhead
+// remain separate from this limit.
 #define VM_LIMIT (48 * 1024)
 static size_t vm_bytes, vm_peak;
 static int64_t deadline;
@@ -303,6 +307,8 @@ static duk_ret_t js_settings_get(duk_context *ctx) {
   for (unsigned i = 0; i < cfg.wu_map_count; i++) {
     duk_push_object(ctx);
     NUMBER_PROPERTY("gauge_id", cfg.wu_map[i].gauge_id);
+    duk_push_string(ctx, cfg.wu_map[i].device);
+    duk_put_prop_string(ctx, -2, "device");
     duk_push_string(ctx, cfg.wu_map[i].wu_id);
     duk_put_prop_string(ctx, -2, "wu_id");
     duk_push_string(ctx, cfg.wu_map[i].wu_key);
@@ -407,12 +413,17 @@ static duk_ret_t js_settings_set(duk_context *ctx) {
         duk_get_prop_index(ctx, -1, i);
         duk_idx_t row = duk_get_top_index(ctx);
         duk_get_prop_string(ctx, row, "gauge_id");
-        double gauge = duk_require_number(ctx, -1);
-        if (!isfinite(gauge) || gauge < 1 || gauge > UINT32_MAX ||
+        double gauge = duk_is_undefined(ctx, -1) ? 0 : duk_require_number(ctx, -1);
+        if (!isfinite(gauge) || gauge < 0 || gauge > UINT32_MAX ||
             gauge != (uint32_t)gauge)
           return duk_error(ctx, DUK_ERR_RANGE_ERROR, "invalid gauge_id");
         cfg.wu_map[i].gauge_id = gauge;
         duk_pop(ctx);
+        duk_get_prop_string(ctx, row, "device");
+        bool has_device = !duk_is_undefined(ctx, -1);
+        duk_pop(ctx);
+        if (has_device) read_string(ctx, row, "device", cfg.wu_map[i].device,
+                                    sizeof(cfg.wu_map[i].device));
         read_string(ctx, row, "wu_id", cfg.wu_map[i].wu_id,
                     sizeof(cfg.wu_map[i].wu_id));
         read_string(ctx, row, "wu_key", cfg.wu_map[i].wu_key,
@@ -674,6 +685,27 @@ static int read_byte(uint8_t *byte) {
 #endif
 }
 
+// Implemented by the application: boot checkpoints need no heap allocations.
+extern void bridge_memory_audit_print(void);
+static void print_memory(bool detailed) {
+  bridge_memory_audit_print();
+  multi_heap_info_t info;
+  heap_caps_get_info(&info, MALLOC_CAP_8BIT);
+  printf("Memory bytes: allocated=%u free=%u total=%u minimum=%u largest=%u blocks=%u VM_payload=%u\n",
+         (unsigned)info.total_allocated_bytes, (unsigned)info.total_free_bytes,
+         (unsigned)(info.total_allocated_bytes + info.total_free_bytes),
+         (unsigned)info.minimum_free_bytes, (unsigned)info.largest_free_block,
+         (unsigned)info.allocated_blocks, (unsigned)vm_bytes);
+  heap_caps_print_heap_info(MALLOC_CAP_8BIT);
+#if CONFIG_HEAP_TASK_TRACKING
+  if (detailed) heap_caps_print_all_task_stat(NULL);
+  else heap_caps_print_all_task_stat_overview(NULL);
+#else
+  (void)detailed;
+  printf("Per-task attribution requires MEMORY_AUDIT=1\n");
+#endif
+  printf("Result=OK\n");
+}
 static void console_task(void *unused) {
   (void)unused;
   for (;;) {
@@ -683,6 +715,9 @@ static void console_task(void *unused) {
     console_line_result_t result = console_line_feed(&input_line, byte);
     if (result == CONSOLE_LINE_INVALID) {
       printf("Result=ERROR invalid or oversized console line; discarded\n");
+    } else if (result == CONSOLE_LINE_READY &&
+               (!strcmp(input_line.bytes, "mem") || !strcmp(input_line.bytes, "mem full"))) {
+      print_memory(!strcmp(input_line.bytes, "mem full"));
     } else if (result == CONSOLE_LINE_READY &&
                !strncmp(input_line.bytes, "js ", 3)) {
       bool success = execute(input_line.bytes + 3);

@@ -22,6 +22,16 @@ case "${DEBUG_CONSOLE:-0}" in
   *) echo "DEBUG_CONSOLE must be 0 or 1" >&2; exit 1 ;;
 esac
 
+# Heap attribution changes allocation overhead, so keep audit builds separate.
+case "${MEMORY_AUDIT:-0}" in
+  0) ;;
+  1)
+    [[ "$debug_console" == ON ]] || { echo "MEMORY_AUDIT requires DEBUG_CONSOLE=1" >&2; exit 1; }
+    build_dir+=-audit; config+=.audit; defaults+=";sdkconfig.audit.defaults"
+    ;;
+  *) echo "MEMORY_AUDIT must be 0 or 1" >&2; exit 1 ;;
+esac
+
 case "${RADIO:-$default_radio}" in
   0) radio=OFF ;;
   1) radio=ON ;;

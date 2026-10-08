@@ -50,6 +50,7 @@
 </div>
 <div id=viewFirmware hidden>
 <h3>Firmware</h3>
+<p id=hardwareTag class=small hidden></p>
 <p id=otaStat class=small></p>
 <div class=row><button type=button id=otaCheckBtn class=mini>Check for updates</button><button type=button id=otaApplyBtn class=mini hidden>Update now</button></div>
 <details id=manualUpdate>
@@ -74,14 +75,12 @@
 <h3>Radio devices</h3>
 <p id=radioDeviceStatus class=small></p>
 <div id=radioRows><div id=radioDeviceList></div></div>
-<p class=hint>Mappings are saved here. Radio rainfall forwarding is still being developed.</p>
+<p class=hint>Add uploaders to send detected rainfall to Rainlog and optionally Weather Underground.</p>
 
 </section>
 <!-- RADIO_END -->
-<h3>Weather Underground</h3>
-<p class=hint>Optional. Relay each gauge to a Weather Underground station. The console keeps sending its Rainlog credentials; the bridge maps the Rainlog station ID to these WU credentials.</p>
-<div id=wuRows></div>
-<button type=button id=addBtn class=mini>Add forward</button>
+<!-- Preserve saved WU uploaders until their device card is available. -->
+<div id=pendingWuUploaders hidden></div>
 <button type=submit form=form>Save &amp; reboot bridge</button>
 </div>
 </div>

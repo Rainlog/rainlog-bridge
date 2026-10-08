@@ -78,10 +78,50 @@ static display_color_t result_color(const char *r) {
 }
 #endif  // SHOW_LAST_AND_UPTIME
 
+// Capture dynamic values once so all strips display the same frame.
+static struct {
+  char ssid[33], sta_ip[16], ap_ip[16], latest[24];
+  int rssi, station_count, rl24, wu24, pending, client_count;
+  uint32_t rl_total, wu_total;
+  bool have_net, up, update_available;
+  ap_client_t clients[AP_CLIENTS_MAX];
+#if SHOW_LAST_AND_UPTIME
+  char result[16];
+  int64_t seconds_since_upload, uptime_s;
+#endif
+} frame;
+
+void screen_status_prepare(void) {
+  frame.have_net = wifi_link_sta_ap_info(frame.ssid, sizeof(frame.ssid), &frame.rssi);
+  frame.up = wifi_link_sta_has_ip();
+  wifi_link_sta_ip_str(frame.sta_ip, sizeof(frame.sta_ip));
+  wifi_link_ap_ip_str(frame.ap_ip, sizeof(frame.ap_ip));
+  frame.station_count = wifi_link_ap_station_count();
+  frame.rl24 = upload_stats_count_last_24h(UPLOAD_TARGET_RL);
+  frame.wu24 = upload_stats_count_last_24h(UPLOAD_TARGET_WU);
+  frame.rl_total = upload_stats_total(UPLOAD_TARGET_RL);
+  frame.wu_total = upload_stats_total(UPLOAD_TARGET_WU);
+  frame.pending = forwarder_pending_count();
+  frame.update_available = ota_update_available();
+  ota_update_latest(frame.latest, sizeof(frame.latest));
+  frame.client_count = ap_clients_snapshot(frame.clients, AP_CLIENTS_MAX);
+  for (int i = 1; i < frame.client_count; i++) {
+    ap_client_t c = frame.clients[i];
+    int j = i;
+    for (; j > 0 && frame.clients[j - 1].last_upload_us < c.last_upload_us; j--)
+      frame.clients[j] = frame.clients[j - 1];
+    frame.clients[j] = c;
+  }
+#if SHOW_LAST_AND_UPTIME
+  snprintf(frame.result, sizeof(frame.result), "%s", forwarder_last_result());
+  frame.seconds_since_upload = forwarder_seconds_since_upload();
+  frame.uptime_s = esp_timer_get_time() / 1000000;
+#endif
+}
+
 void screen_status_draw(void) {
   const bridge_config_t *cfg = config_get();
   char buf[48];
-  char ip[16];
   int y = Y_CONTENT_TOP;
 
   // ---- Home Wi-Fi (the LAN side) -------------------------------------------
@@ -90,22 +130,14 @@ void screen_status_draw(void) {
   // Network name, colored by uplink state (green = up, amber = connecting),
   // with signal-strength bars on the right. Truncated so it never runs into
   // the bars; falls back to the configured SSID while not associated.
-  char ssid[33];
-  int rssi = 0;
-  bool have_net = wifi_link_sta_ap_info(ssid, sizeof(ssid), &rssi);
-  bool up = wifi_link_sta_has_ip();
-  snprintf(buf, sizeof(buf), "%.17s", have_net ? ssid : cfg->sta_ssid);
-  display_text(X_TEXT, y, 1, up ? COLOR_GREEN : COLOR_AMBER, buf);
-  if (have_net) {
-    // Bottom-align the bars with the glyph baseline (ink ends ~row 10).
-    draw_signal_bars(DISPLAY_W - 20, y + 11, rssi_level(rssi));
-  }
+  snprintf(buf, sizeof(buf), "%.17s", frame.have_net ? frame.ssid : cfg->sta_ssid);
+  display_text(X_TEXT, y, 1, frame.up ? COLOR_GREEN : COLOR_AMBER, buf);
+  if (frame.have_net) draw_signal_bars(DISPLAY_W - 20, y + 11, rssi_level(frame.rssi));
   y += ROW_H;
 
   // The bridge's address on the home LAN ("--" while the uplink is down);
   // where to reach the setup page from that side.
-  wifi_link_sta_ip_str(ip, sizeof(ip));
-  display_text(X_TEXT, y, 1, COLOR_GREY, ip);
+  display_text(X_TEXT, y, 1, COLOR_GREY, frame.sta_ip);
   y += ROW_H + SECTION_GAP;
 
   // ---- Bridge Wi-Fi (the SoftAP side) ---------------------------------------
@@ -116,9 +148,8 @@ void screen_status_draw(void) {
 
   // The setup-page address on the bridge's own network, plus how many devices
   // (weather consoles / phones) are joined, right-aligned.
-  wifi_link_ap_ip_str(ip, sizeof(ip));
-  display_text(X_TEXT, y, 1, COLOR_GREY, ip);
-  int n = wifi_link_ap_station_count();
+  display_text(X_TEXT, y, 1, COLOR_GREY, frame.ap_ip);
+  int n = frame.station_count;
   snprintf(buf, sizeof(buf), "%d device%s", n, n == 1 ? "" : "s");
   display_text(DISPLAY_W - X_TEXT - (int)strlen(buf) * GLYPH, y, 1, COLOR_WHITE,
                buf);
@@ -130,17 +161,17 @@ void screen_status_draw(void) {
   // Rainlog successes: the headline counts, highlighted bold; blue, or red
   // when nothing has come in for a day (likely a problem).
   display_color_t blue = display_rgb(96, 176, 255);
-  int c24 = upload_stats_count_last_24h(UPLOAD_TARGET_RL);
+  int c24 = frame.rl24;
   snprintf(buf, sizeof(buf), "RL: %d 24h, %lu total", c24,
-           (unsigned long)upload_stats_total(UPLOAD_TARGET_RL));
+           (unsigned long)frame.rl_total);
   display_text_bold(X_TEXT, y, 1, c24 > 0 ? blue : COLOR_RED, buf);
   y += ROW_H;
 
   // WU relay successes, plain grey, only when relaying is configured.
   if (cfg->wu_map_count > 0 && y <= Y_ROW_LAST) {
     snprintf(buf, sizeof(buf), "WU: %d 24h, %lu total",
-             upload_stats_count_last_24h(UPLOAD_TARGET_WU),
-             (unsigned long)upload_stats_total(UPLOAD_TARGET_WU));
+             frame.wu24,
+             (unsigned long)frame.wu_total);
     display_text(X_TEXT, y, 1, COLOR_GREY, buf);
     y += ROW_H;
   }
@@ -150,20 +181,12 @@ void screen_status_draw(void) {
   // that has uploaded this boot (newest first) plus any currently connected
   // one that hasn't (0/0) - as many as fit while leaving room for the
   // trailing rows below.
-  int pending = forwarder_pending_count();
-  int trailing = (pending > 0 ? 1 : 0) + (ota_update_available() ? 1 : 0) +
+  int pending = frame.pending;
+  int trailing = (pending > 0 ? 1 : 0) + (frame.update_available ? 1 : 0) +
                  2 * SHOW_LAST_AND_UPTIME;
   int y_clients_last = Y_ROW_LAST - trailing * ROW_H;
-  ap_client_t clients[AP_CLIENTS_MAX];
-  int nc = ap_clients_snapshot(clients, AP_CLIENTS_MAX);
-  for (int i = 1; i < nc; i++) {  // insertion sort, newest upload first
-    ap_client_t c = clients[i];
-    int j = i;
-    for (; j > 0 && clients[j - 1].last_upload_us < c.last_upload_us; j--) {
-      clients[j] = clients[j - 1];
-    }
-    clients[j] = c;
-  }
+  const ap_client_t *clients = frame.clients;
+  int nc = frame.client_count;
   bool any_listed = false;
   for (int i = 0; i < nc; i++) {
     if (clients[i].last_upload_us != 0 || clients[i].connected) {
@@ -214,8 +237,8 @@ void screen_status_draw(void) {
 
 #if SHOW_LAST_AND_UPTIME
   // Last forward result + how long ago.
-  const char *res = forwarder_last_result();
-  int64_t ago = forwarder_seconds_since_upload();
+  const char *res = frame.result;
+  int64_t ago = frame.seconds_since_upload;
   if (ago >= 0) {
     snprintf(buf, sizeof(buf), "Last: %s  %llds", res, (long long)ago);
   } else {
@@ -228,7 +251,7 @@ void screen_status_draw(void) {
 
   // Uptime since last boot.
   if (y <= Y_ROW_LAST) {
-    int64_t up_s = esp_timer_get_time() / 1000000;
+    int64_t up_s = frame.uptime_s;
     snprintf(buf, sizeof(buf), "Uptime: %dh %dm", (int)(up_s / 3600),
              (int)((up_s % 3600) / 60));
     display_text(X_TEXT, y, 1, COLOR_GREY, buf);
@@ -238,10 +261,8 @@ void screen_status_draw(void) {
 
   // Newer-firmware-available notice (apply it from the setup page). Only when
   // a check has found a newer version.
-  if (ota_update_available() && y <= Y_ROW_LAST) {
-    char latest[24];
-    ota_update_latest(latest, sizeof(latest));
-    snprintf(buf, sizeof(buf), "New FW: v%.12s", latest);
+  if (frame.update_available && y <= Y_ROW_LAST) {
+    snprintf(buf, sizeof(buf), "New FW: v%.12s", frame.latest);
     display_text(X_TEXT, y, 1, COLOR_AMBER, buf);
   }
 }

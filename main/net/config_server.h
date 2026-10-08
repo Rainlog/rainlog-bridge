@@ -18,7 +18,8 @@ char *config_server_config_json(void);
 char *config_server_scan_json(bool live);
 char *config_server_clients_json(uint32_t peer_ip);
 esp_err_t config_server_save_form(const char *body, const char **error);
-esp_err_t config_server_rename(const char *mac, const char *name);
+// Device identity: Wi-Fi MAC or radio:<model>:<sensor_id>:<channel>.
+esp_err_t config_server_rename(const char *device_identity, const char *name);
 void config_server_restart(void);
 
 #if RAINLOG_RADIO

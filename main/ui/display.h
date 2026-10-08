@@ -1,9 +1,8 @@
 // Rainlog Wireless Bridge - LCD display primitives.
 //
 // Drives the selected ST7789 LCD or SSD1306 OLED via esp_lcd, rendering a
-// board-selected bitmap font (X11 misc-fixed) into an in-RAM
-// framebuffer. Caller composes a frame with display_clear/display_text, then
-// display_flush pushes it to the panel.
+// board-selected bitmap font (X11 misc-fixed). LCD frames are rendered in
+// 16-row strips; the OLED retains its small packed framebuffer.
 #pragma once
 
 #include <stdbool.h>
@@ -31,7 +30,10 @@ typedef uint8_t display_color_t;
 #define DISPLAY_FB_BYTES (DISPLAY_W * DISPLAY_H / 8)
 #else
 typedef uint16_t display_color_t;
-#define DISPLAY_FB_BYTES (DISPLAY_W * DISPLAY_H * sizeof(display_color_t))
+#ifndef DISPLAY_STRIP_ROWS
+#define DISPLAY_STRIP_ROWS 16
+#endif
+#define DISPLAY_FB_BYTES (DISPLAY_W * DISPLAY_STRIP_ROWS * sizeof(display_color_t))
 #endif
 display_color_t display_rgb(uint8_t r, uint8_t g, uint8_t b);
 
@@ -46,14 +48,15 @@ display_color_t display_rgb(uint8_t r, uint8_t g, uint8_t b);
 #define COLOR_AMBER display_rgb(255, 170, 0)
 
 // Bring up the panel transport and brightness control. Returns false if init
-// failed (caller then skips all UI). Allocates the framebuffer.
+// failed (caller then skips all UI). Allocates the board
+// render buffer.
 bool display_init(void);
 
-// Fill the whole framebuffer with one color.
+// Fill the current render buffer with one color.
 void display_clear(display_color_t color);
 
 // Draw a NUL-terminated string at (x, y) top-left, integer-scaled by `scale`
-// (1 = GLYPH_H pixels tall). Clipped to the framebuffer. No wrapping.
+// (1 = GLYPH_H pixels tall). Clipped to the active strip or OLED framebuffer. No wrapping.
 void display_text(int x, int y, int scale, display_color_t color,
                   const char *str);
 
@@ -61,7 +64,7 @@ void display_text(int x, int y, int scale, display_color_t color,
 void display_text_bold(int x, int y, int scale, display_color_t color,
                        const char *str);
 
-// Fill a w*h rectangle at (x, y) with one color. Clipped to the framebuffer.
+// Fill a w*h rectangle at (x, y) with one color. Clipped to the active strip or OLED framebuffer.
 void display_fill_rect(int x, int y, int w, int h, display_color_t color);
 
 // Set brightness, 0..100 percent (LCD PWM or OLED contrast; 0 turns it off).
@@ -76,5 +79,7 @@ void display_blit_rgba(int x, int y, int w, int h, const uint8_t *rgba);
 // Height must be a multiple of 8. Zero bits draw black, one bits draw white.
 void display_blit_mono(int x, int y, int w, int h, const uint8_t *pages);
 
-// Push the framebuffer to the panel.
-void display_flush(void);
+// Render a complete frame. LCD callbacks run once per strip and must use a
+// stable snapshot and have no side effects. Drawing uses full-screen coordinates.
+// OLED callbacks run once. Each transfer completes before the buffer is reused.
+void display_render(void (*draw)(void *), void *context);

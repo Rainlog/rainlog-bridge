@@ -54,13 +54,14 @@ static bool append(char *out, size_t size, size_t *used, const char *fmt, ...) {
 bool rain_upload_encode(char *out, size_t size, uint32_t gauge,
                         const char *key, const weather_packet_t *p,
                         uint64_t total_microin, time_t observed) {
-  if (!size || !gauge || !key || !*key || !p->has_rain ||
+  if (!size || !key || (gauge && !*key) || !p->has_rain ||
       !counter_modulus(p) || observed < 1600000000) return false;
   struct tm utc;
   if (!gmtime_r(&observed, &utc)) return false;
   size_t used = 0;
-  if (!append(out, size, &used, "ID=Rainlog%lu&PASSWORD=", (unsigned long)gauge))
-    return false;
+  if (gauge) {
+    if (!append(out, size, &used, "ID=Rainlog%lu&PASSWORD=", (unsigned long)gauge)) return false;
+  } else if (!append(out, size, &used, "ID=&PASSWORD=")) return false;
   for (const unsigned char *s = (const unsigned char *)key; *s; s++) {
     bool unreserved = (*s >= 'A' && *s <= 'Z') || (*s >= 'a' && *s <= 'z') ||
                       (*s >= '0' && *s <= '9') || strchr("-_.~", *s);

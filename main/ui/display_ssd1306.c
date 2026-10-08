@@ -49,11 +49,11 @@ esp_err_t display_panel_init(void) {
   return esp_lcd_panel_disp_on_off(s_panel, true);
 }
 
-esp_err_t display_panel_flush(const display_color_t *pixels) {
+esp_err_t display_panel_flush(const display_color_t *pixels, int y, int rows) {
   // ESP-IDF's I2C panel IO transmits synchronously. The framebuffer is free
   // for reuse when this returns; no SPI-style DMA semaphore is needed.
-  return esp_lcd_panel_draw_bitmap(s_panel, 0, 0, BOARD_DISPLAY_W,
-                                   BOARD_DISPLAY_H, pixels);
+  return esp_lcd_panel_draw_bitmap(s_panel, 0, y, BOARD_DISPLAY_W,
+                                   y + rows, pixels);
 }
 
 esp_err_t display_panel_brightness(uint8_t percent) {

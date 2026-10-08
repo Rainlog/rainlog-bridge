@@ -15,7 +15,9 @@ Rainlog gauges. Mapped rainfall is encoded and forwarded through the existing
 retry worker. Repeats remain visible
 in the raw packet history.
 RSSI is sampled after capture, so it can reflect background noise rather
-than the transmitting station's signal strength.
+than the transmitting station's signal strength. The Devices cards show this
+last-received estimate as four relative bars and dBm, with the sampling caveat
+in the tooltip. Saved sensors not yet seen this boot have no signal indicator.
 
 Supported protocols:
 
@@ -91,17 +93,17 @@ keep setup Wi-Fi available until provisioning. Saved choices override defaults.
 
 ## Radio uploads
 
-Only mapped sensors with a decoded rain counter upload. The forwarder task
+Sensors with a Rainlog or device-keyed WU uploader and a decoded rain counter upload. The forwarder task
 polls the latest sensor inventory each second and queues encoded snapshots,
 so TLS never runs in the pulse capture task or on the encoder call stack. Each gauge emits at most one fresh snapshot every 305 seconds
 (Rainlog accepts one per 300 seconds); repeated frames and stale inventory do
 not create extra readings. SNTP must establish a wall clock first. `dateutc`
 is the reception time, preserved through the existing LittleFS retry queue.
 
-`ID=Rainlog<gauge_id>` and `PASSWORD=<PWS key>` come from the saved mapping.
+`ID=Rainlog<gauge_id>` and `PASSWORD=<PWS key>` come from the saved Rainlog mapping. WU-only sensors omit these credentials and skip Rainlog entirely; WU credentials are selected by model/ID/channel. Combined uploaders share one encoded snapshot. Legacy WU gauge mappings remain readable and keep working.
 `totalrainin` is the cumulative counter in inches, using 0.0105 in per TX5U tip
 and 0.01 in per Iris tip. Counter baselines and expanded totals are stored in
-the `radio_rain` NVS namespace before transmission and only rewritten when
+the `radio_rain` NVS namespace (legacy Rainlog gauge keys, or sensor identity keys for WU-only sensors) before transmission and only rewritten when
 they change. Normal rollover is expanded; other decreases and sensor identity
 changes rebase without adding old rain. A same-ID reset near the end of its
 counter range cannot be distinguished from rollover, and multiple complete

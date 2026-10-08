@@ -10,8 +10,7 @@
 // "Rainlog<gaugeId>" + the gauge's PWS key) directly, so the bridge passes its
 // upload through to Rainlog unchanged. Radio sensors instead require a saved
 // Rainlog gauge ID and PWS key in their own mapping. The WU
-// map says, per Rainlog gauge id, which Weather Underground credentials to also
-// relay that gauge's upload under: rainlog gauge id -> (wu id, wu key).
+// map selects WU credentials by device identity, with legacy gauge IDs retained.
 #pragma once
 
 #include <stdbool.h>
@@ -21,13 +20,14 @@
 #include "esp_err.h"
 #include "radio/weather_protocols.h"
 
-// Max Weather Underground relay mappings (one per gauge the bridge serves).
+// Max Weather Underground uploaders (one per device, or legacy gauge).
 #define WU_MAP_MAX 8
 
 typedef struct {
-  uint32_t gauge_id;  // Rainlog gauge id (map key); 0 = unused slot
+  uint32_t gauge_id;  // legacy fallback key; zero for device-only uploaders
   char wu_id[64];     // WU station id to relay this gauge's uploads under
   char wu_key[65];    // WU station key/password
+  char device[40];    // Wi-Fi MAC or radio:<model>:<id>:<channel>; empty = legacy
 } wu_mapping_t;
 
 #if RAINLOG_RADIO
@@ -54,7 +54,7 @@ typedef struct {
   // the AP (WPA2) and, via a sign-in session or HTTP Basic auth, opening the
   // config page from the home LAN.
   char ap_pass[65];
-  wu_mapping_t wu_map[WU_MAP_MAX];  // gauge id -> WU relay credentials
+  wu_mapping_t wu_map[WU_MAP_MAX];  // device identity -> WU credentials
   uint8_t wu_map_count;             // active entries in wu_map
   char rainlog_host[128];
   char wu_host[128];
@@ -77,6 +77,8 @@ const bridge_config_t *config_get(void);
 
 // The WU relay mapping for a Rainlog gauge id, or NULL if none is configured.
 const wu_mapping_t *config_find_wu_mapping(uint32_t gauge_id);
+const wu_mapping_t *config_find_wu_device(const char *device, uint32_t legacy_gauge);
+bool config_device_identity_valid(const char *device);
 
 // Parse a Rainlog gauge id out of a station-id string. The Rainlog station id
 // is the literal "Rainlog" + the gauge number ("Rainlog12345"); a bare number
