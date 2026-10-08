@@ -358,11 +358,7 @@ static duk_ret_t js_settings_set(duk_context *ctx) {
     const char *name = duk_require_string(ctx, -2);
     if (!strcmp(name, "sta_ssid") || !strcmp(name, "sta_pass") ||
         !strcmp(name, "ap_ssid") || !strcmp(name, "ap_pass") ||
-        !strcmp(name, "wu_map")
-#if RAINLOG_RADIO
-        || !strcmp(name, "wifi_interception_enabled")
-#endif
-    )
+        !strcmp(name, "wu_map"))
       cfg.provisioned = true;
 #if RAINLOG_RADIO
     if (!strcmp(name, "radio_map")) {

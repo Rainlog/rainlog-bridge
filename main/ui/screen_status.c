@@ -83,7 +83,7 @@ static struct {
   char ssid[33], sta_ip[16], ap_ip[16], latest[24];
   int rssi, station_count, rl24, wu24, pending, client_count;
   uint32_t rl_total, wu_total;
-  bool have_net, up, update_available;
+  bool have_net, up, ap_enabled, update_available;
   ap_client_t clients[AP_CLIENTS_MAX];
 #if SHOW_LAST_AND_UPTIME
   char result[16];
@@ -94,6 +94,7 @@ static struct {
 void screen_status_prepare(void) {
   frame.have_net = wifi_link_sta_ap_info(frame.ssid, sizeof(frame.ssid), &frame.rssi);
   frame.up = wifi_link_sta_has_ip();
+  frame.ap_enabled = wifi_link_ap_enabled();
   wifi_link_sta_ip_str(frame.sta_ip, sizeof(frame.sta_ip));
   wifi_link_ap_ip_str(frame.ap_ip, sizeof(frame.ap_ip));
   frame.station_count = wifi_link_ap_station_count();
@@ -143,12 +144,14 @@ void screen_status_draw(void) {
   // ---- Bridge Wi-Fi (the SoftAP side) ---------------------------------------
   y = draw_section(y, "Bridge Wi-Fi");
 
-  display_text(X_TEXT, y, 1, COLOR_GREEN, cfg->ap_ssid);
+  display_text(X_TEXT, y, 1, frame.ap_enabled ? COLOR_GREEN : COLOR_GREY,
+               frame.ap_enabled ? cfg->ap_ssid : "Sleeping");
   y += ROW_H;
 
   // The setup-page address on the bridge's own network, plus how many devices
   // (weather consoles / phones) are joined, right-aligned.
-  display_text(X_TEXT, y, 1, COLOR_GREY, frame.ap_ip);
+  display_text(X_TEXT, y, 1, COLOR_GREY,
+               frame.ap_enabled ? frame.ap_ip : "5 min idle timeout");
   int n = frame.station_count;
   snprintf(buf, sizeof(buf), "%d device%s", n, n == 1 ? "" : "s");
   display_text(DISPLAY_W - X_TEXT - (int)strlen(buf) * GLYPH, y, 1, COLOR_WHITE,

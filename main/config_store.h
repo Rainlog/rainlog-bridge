@@ -45,8 +45,8 @@ typedef struct {
   radio_mapping_t radio_map[RADIO_MAP_MAX];
   uint8_t radio_map_count;
   uint32_t radio_enabled;
-  uint32_t wifi_interception_enabled;
 #endif
+  uint32_t bridge_wifi_auto_off;
   char sta_ssid[33];  // home WiFi (STA uplink)
   char sta_pass[65];
   char ap_ssid[33];  // SoftAP the station joins
@@ -118,6 +118,5 @@ const radio_mapping_t *config_find_radio_mapping(uint8_t model,
 #endif
 
 // True when the bridge hosts station Wi-Fi and intercepts WU uploads.
-bool config_wifi_interception_enabled(void);
 // Radio mappings reserve their Rainlog gauge exclusively, even while paused.
 bool config_gauge_uses_radio(uint32_t gauge_id);

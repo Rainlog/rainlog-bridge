@@ -25,10 +25,8 @@
 <div class=row><button type=button id=testBtn class=mini>Test connection</button></div>
 <div id=tstat></div>
 <h3>Bridge Wi-Fi</h3>
-<!-- RADIO_BEGIN -->
-<label class=check><input type=checkbox name=wifi_interception_enabled id=wifiInterceptionEnabled>Enable Wi-Fi interception</label>
-<p class=hint>Host Bridge Wi-Fi for station consoles. Home Wi-Fi stays connected when this is off.</p>
-<!-- RADIO_END -->
+<label class=check><input type=checkbox name=bridge_wifi_auto_off id=bridgeWifiAutoOff>Turn off Bridge Wi-Fi after 5 idle minutes</label>
+<p class=hint>Stays on while devices are connected, during setup, or if Home Wi-Fi is down. Restart the bridge, press its setup button, or open this page through Home Wi-Fi to wake it. Home Wi-Fi and weather radio keep working.</p>
 <fieldset id=bridgeWifiFields style="border:0;padding:0;margin:0;min-width:0">
 <label>Network name (this device)</label>
 <input name=ap_ssid placeholder="Network name">
@@ -41,7 +39,6 @@
 <h3>Weather radio</h3>
 <label class=check><input type=checkbox name=radio_enabled id=radioEnabled checked>Enable radio reception</label>
 <input type=hidden name=radio_form value=2>
-<p id=reception_err class=err></p>
 <p id=radioStatus class=small>Reading radio status...</p>
 </section>
 <!-- RADIO_END -->

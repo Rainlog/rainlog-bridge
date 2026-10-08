@@ -122,7 +122,7 @@ static void tls_capture_start(void) {
 }
 
 void capture_server_start(void) {
-  if (config_wifi_interception_enabled()) tls_capture_start();
+  tls_capture_start();
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
   config.lru_purge_enable = true;
   // Cap held sockets so the plain-HTTP server leaves room for the TLS server,
@@ -152,10 +152,8 @@ void capture_server_start(void) {
       .method = HTTP_POST,
       .handler = wu_upload_handler,
   };
-  if (config_wifi_interception_enabled()) {
-    httpd_register_uri_handler(s_server, &get_uri);
-    httpd_register_uri_handler(s_server, &post_uri);
-  }
+  httpd_register_uri_handler(s_server, &get_uri);
+  httpd_register_uri_handler(s_server, &post_uri);
   ESP_LOGI(TAG, "capture server up on port 80 %s",
            config_get()->wu_update_path);
 }

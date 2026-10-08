@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "activity.h"
 #include "config_store.h"
 #include "esp_event.h"
 #include "esp_log.h"
@@ -11,6 +12,7 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "status_led.h"
+#include "wifi_idle.h"
 
 static const char *TAG = "wifi_link";
 
@@ -109,6 +111,7 @@ static void on_wifi_event(void *arg, esp_event_base_t base, int32_t id,
       ESP_LOGI(TAG, "station joined SoftAP (%d)", s_ap_sta_count);
       break;
     case WIFI_EVENT_AP_STADISCONNECTED: {
+      activity_poke();  // Start a full idle window when the last client leaves.
       wifi_event_ap_stadisconnected_t *d =
           (wifi_event_ap_stadisconnected_t *)data;
       if (s_ap_sta_count > 0) {
@@ -136,9 +139,8 @@ static void on_got_ip(void *arg, esp_event_base_t base, int32_t id,
   // out the STA side (lwIP NAPT, CONFIG_LWIP_IPV4_NAPT). Weather consoles
   // need it for NTP / vendor clouds; WU uploads are still DNS-spoofed to the
   // bridge and captured. Harmless to re-run on every reconnect.
-  esp_err_t napt = config_wifi_interception_enabled()
-                       ? esp_netif_napt_enable(s_ap_netif)
-                       : ESP_OK;
+  esp_err_t napt =
+      wifi_link_ap_enabled() ? esp_netif_napt_enable(s_ap_netif) : ESP_OK;
   if (napt != ESP_OK) {
     ESP_LOGW(TAG, "NAPT enable failed: %s", esp_err_to_name(napt));
   }
@@ -223,11 +225,9 @@ void wifi_link_start(void) {
   // SoftAP channel and can leave the AP unable to accept associations.
   ap_cfg.ap.channel = 1;
 
-  ESP_ERROR_CHECK(esp_wifi_set_mode(
-      config_wifi_interception_enabled() ? WIFI_MODE_APSTA : WIFI_MODE_STA));
+  ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
   apply_sta_config(cfg->sta_ssid, cfg->sta_pass);
-  if (config_wifi_interception_enabled())
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap_cfg));
+  ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap_cfg));
   ESP_ERROR_CHECK(esp_wifi_start());
   // STA modem sleep: let the radio nap between beacons when the uplink is idle.
   // (SoftAP keeps the radio on overall, but this still trims STA-side power.)
@@ -371,4 +371,25 @@ bool wifi_link_ap_enabled(void) {
   wifi_mode_t mode;
   return esp_wifi_get_mode(&mode) == ESP_OK &&
          (mode == WIFI_MODE_AP || mode == WIFI_MODE_APSTA);
+}
+
+void wifi_link_poll(void) {
+  static int64_t last_activity;
+  const bridge_config_t *cfg = config_get();
+  int64_t now = esp_timer_get_time();
+  int64_t user_activity = activity_last_us();
+  if (user_activity > last_activity) last_activity = user_activity;
+  bool clients = s_ap_sta_count > 0;
+  if (!cfg->provisioned || !s_sta_has_ip || clients) last_activity = now;
+  bool awake = wifi_idle_keep_awake(cfg->bridge_wifi_auto_off, cfg->provisioned,
+                                    s_sta_has_ip, clients, now, last_activity);
+  if (awake == wifi_link_ap_enabled()) return;
+  esp_err_t err = esp_wifi_set_mode(awake ? WIFI_MODE_APSTA : WIFI_MODE_STA);
+  if (err != ESP_OK) {
+    ESP_LOGW(TAG, "Bridge Wi-Fi mode change failed: %s", esp_err_to_name(err));
+    return;
+  }
+  if (awake && s_sta_has_ip) esp_netif_napt_enable(s_ap_netif);
+  ESP_LOGI(TAG, "Bridge Wi-Fi %s",
+           awake ? "awake" : "sleeping after 5 idle minutes");
 }

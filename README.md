@@ -95,6 +95,12 @@ To upload to Weather Underground, choose **Add WU Uploader** on the device card 
 
 ### If something is wrong
 
+Bridge Wi-Fi starts on boot. Enable “Turn off Bridge Wi-Fi after 5 idle minutes”
+(the default) to stop its network after 300 seconds with no connected devices or
+local activity. Connected weather consoles, initial setup, and a missing Home
+Wi-Fi connection keep it awake. Restart, press the setup button, or open the
+setup page through Home Wi-Fi to wake it. Uncheck the setting to leave it on.
+
 The C6 LCD shows home and bridge Wi-Fi details, 24-hour and lifetime upload totals, and per-device received/sent counters. The LILYGO OLED uses a compact 4x6 font to show home/bridge Wi-Fi details, firmware version, radio reception/device count, 24-hour/lifetime upload counts and device received/sent counters. Queue and firmware-update notices take priority over optional OLED rows. Detailed inventory and error reasons are on the web page's Devices tab.
 
 - **LED dark**: normal. The LED is off during healthy operation and only

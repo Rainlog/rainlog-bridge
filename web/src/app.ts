@@ -37,8 +37,8 @@ interface BridgeConfig {
   ap_ip: string;
   wu_map: WuMapping[];
   radio_enabled?: boolean;
-  wifi_interception_enabled?: boolean;
-  wifi_interception_active?: boolean;
+  bridge_wifi_auto_off: boolean;
+  bridge_wifi_active: boolean;
   radio_map?: Parameters<
     ReturnType<typeof createRadio>['load']
   >[0]['radio_map'];
@@ -187,7 +187,6 @@ function homePwError(): string | null {
 // Bridge Wi-Fi password: must be set when still the default, and any new value
 // must be 8+ chars and not the shipped default (mirrors the firmware).
 function bridgePwError(): string | null {
-  if ((el('bridgeWifiFields') as HTMLFieldSetElement).disabled) return null;
   const v = field('ap_pass').value;
   if (apPassDefault && v.length === 0) {
     return 'Choose a Bridge Wi-Fi password.';
@@ -203,40 +202,7 @@ function bridgePwError(): string | null {
   return null;
 }
 
-function receptionError(): string | null {
-  if (RADIO_MHZ === 0) return null;
-  return !(el('radioEnabled') as HTMLInputElement).checked &&
-    !(el('wifiInterceptionEnabled') as HTMLInputElement).checked
-    ? 'Enable at least one reception source.'
-    : null;
-}
-
 function revalidate(): void {
-  const interception = document.getElementById(
-    'wifiInterceptionEnabled',
-  ) as HTMLInputElement | null;
-  (el('bridgeWifiFields') as HTMLFieldSetElement).disabled =
-    interception !== null && !interception.checked;
-  if (RADIO_MHZ !== 0) {
-    const radio = el('radioEnabled') as HTMLInputElement;
-    radio.disabled = radio.checked && !interception!.checked;
-    interception!.disabled = interception!.checked && !radio.checked;
-    el('reception_err').textContent = receptionError() ?? '';
-    // Disabled checkboxes do not submit, so preserve the locked-on source.
-    el('form')
-      .querySelectorAll('[data-reception]')
-      .forEach((input) => input.remove());
-    [radio, interception!]
-      .filter((input) => input.disabled && input.checked)
-      .forEach((input) => {
-        const value = document.createElement('input');
-        value.type = 'hidden';
-        value.name = input.name;
-        value.value = 'on';
-        value.dataset.reception = '';
-        el('form').append(value);
-      });
-  }
   const he = homePwError();
   const be = bridgePwError();
   el('sta_pass_err').textContent =
@@ -245,7 +211,7 @@ function revalidate(): void {
   document
     .querySelectorAll<HTMLButtonElement>('button[type=submit]')
     .forEach((button) => {
-      button.disabled = Boolean(he || be || receptionError());
+      button.disabled = Boolean(he || be);
     });
 }
 
@@ -622,7 +588,6 @@ const DEV_POLL_MS = 5000;
 
 // The bridge's AP SSID (from /config), for the devices empty-state text.
 let apSsid = '';
-let wifiInterceptionActive = RADIO_MHZ === 0;
 
 // The bridge's AP IP (from /config). Device links only work for a viewer on
 // the bridge's own WiFi (there is no routing from the home LAN into the AP
@@ -784,12 +749,10 @@ function renderDevices(list: ApClient[]): void {
 
 async function pollDevices(): Promise<void> {
   try {
-    if (wifiInterceptionActive) {
-      const clients = (await (await fetch('/clients')).json()) as ApClient[];
-      const gauges = clients.map((client) => client.gauge_id ?? 0);
-      radio?.setWifiGauges(gauges);
-      renderDevices(clients);
-    }
+    const clients = (await (await fetch('/clients')).json()) as ApClient[];
+    const gauges = clients.map((client) => client.gauge_id ?? 0);
+    radio?.setWifiGauges(gauges);
+    renderDevices(clients);
   } catch {
     /* keep the last rendered list on a blip */
   }
@@ -842,9 +805,8 @@ async function loadConfig(): Promise<void> {
   }
   if (cfg) {
     radio?.load(cfg);
-    wifiInterceptionActive =
-      cfg.wifi_interception_active ?? cfg.wifi_interception_enabled ?? true;
-    el('wifiDevices').hidden = !wifiInterceptionActive;
+    (el('bridgeWifiAutoOff') as HTMLInputElement).checked =
+      cfg.bridge_wifi_auto_off;
     apPassDefault = cfg.ap_pass_default;
     apSsid = cfg.ap_ssid;
     apIp = cfg.ap_ip;
@@ -955,7 +917,7 @@ el('form').addEventListener(
 el('form').addEventListener('submit', (e) => {
   // Belt-and-suspenders: Save is disabled while invalid, but guard the submit
   // too so a stray Enter can't POST a bad password and lose the page state.
-  if (homePwError() || bridgePwError() || receptionError()) {
+  if (homePwError() || bridgePwError()) {
     touched.add(field('sta_pass'));
     touched.add(field('ap_pass'));
     revalidate();
@@ -966,9 +928,6 @@ el('form').addEventListener('submit', (e) => {
   radio?.numberRows();
 });
 
-document
-  .getElementById('wifiInterceptionEnabled')
-  ?.addEventListener('change', revalidate);
 document.getElementById('radioEnabled')?.addEventListener('change', revalidate);
 
 void loadConfig();

@@ -98,7 +98,7 @@ int main(void) {
   assert(!cfg.provisioned && cfg.display_full_pct == 100 &&
          cfg.display_dim_after_s == 30);
   assert(!config_validate(&cfg));
-  assert(!cfg.wifi_interception_enabled && config_wifi_interception_enabled());
+  assert(cfg.bridge_wifi_auto_off);
   strcpy(cfg.sta_ssid, "test-network");
   cfg.display_dim_pct = 12;
   cfg.display_dim_after_s = 0;
@@ -110,11 +110,8 @@ int main(void) {
   strcpy(cfg.wu_map[0].wu_id, "TEST");
   strcpy(cfg.wu_map[0].wu_key, "dummy");
   cfg.radio_enabled = 0;
-  assert(config_validate(&cfg));
-  assert(config_update(&cfg) != 0);
-  cfg.wifi_interception_enabled = 1;
   assert(!config_validate(&cfg));
-  cfg.wifi_interception_enabled = 0;
+  cfg.bridge_wifi_auto_off = 0;
   cfg.radio_enabled = 1;
   cfg.radio_map_count = 1;
   cfg.radio_map[0].sensor_id = 4;
@@ -175,16 +172,16 @@ int main(void) {
   fail_commit = 0;
   cfg = *config_get();
   assert(config_save(&cfg) == 0 && config_is_provisioned());
-  assert(!config_wifi_interception_enabled());
+  assert(!config_get()->bridge_wifi_auto_off);
   config_load();
   assert(config_is_provisioned());
   assert(config_parse_gauge_id("Rainlog4294967295", true) == UINT32_MAX);
   assert(config_parse_gauge_id("4294967296", false) == 0);
   assert(config_parse_gauge_id("-1", false) == 0);
   assert(nvs_set_u32(1, "radio_enabled", 0) == 0);
-  assert(nvs_set_u32(1, "wifi_capture", 0) == 0);
+  assert(nvs_set_u32(1, "ap_auto_off", 0) == 0);
   config_load();
-  assert(config_get()->radio_enabled && !config_get()->wifi_interception_enabled);
+  assert(!config_get()->radio_enabled && !config_get()->bridge_wifi_auto_off);
   assert(!strcmp(config_get()->sta_ssid, "test-network"));
   assert(config_get()->radio_map[0].gauge_id == 321);
   assert(config_clear() == 0);

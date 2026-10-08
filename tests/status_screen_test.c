@@ -37,7 +37,7 @@ uint32_t upload_stats_total(upload_target_t target) {
 }
 static bridge_config_t cfg;
 static bool up = true, ap = true, update, provisioned = true;
-static int pending, row_count;
+static int pending, row_count, client_count = 1;
 static char result[16] = "OK";
 static struct {
   int x, y;
@@ -78,7 +78,7 @@ int ap_clients_snapshot(ap_client_t *out, int max) {
                          .gauge_id = 123,
                          .vendor = "Weather station",
                          .name = "Back yard weather station"};
-  return 2;
+  return client_count;
 }
 void radio_status(radio_status_t *out) {
   *out = (radio_status_t){
@@ -168,15 +168,23 @@ int main(int argc, char **argv) {
   assert(has("192.168.100.123"));
   assert(has("433MHz 1 seen") && has("v1.0.0"));
   assert(has("Home Wi-Fi") && has("Bridge Wi-Fi") && has("Forwarding") &&
-         has("RL: 12 24h") && has("3456 total") && has("WU: 34 24h") && has("7890 total"));
+         has("RL: 12 24h") && !has("3456 total") && has("WU: 34 24h") && !has("7890 total"));
   for (int i = 1; i < row_count; i++)
     if (!strcmp(rows[i].text, "Bridge Wi-Fi") ||
         !strcmp(rows[i].text, "Forwarding"))
       assert(rows[i].y - rows[i - 1].y == GLYPH_H + 1 + 3);
+  client_count = 2;
   pending = 3;
   update = true;
   draw();
   assert(has("Retry queue: 3") && has("New FW: v1.0.1"));
+  ap = true;
+  draw();
+  assert(oled_row_limit == 13);
+  assert(has("Retry queue: 3") && has("New FW: v1.0.1"));
+  for (int i = 1; i < row_count; i++)
+    if (!strcmp(rows[i].text, "Bridge Wi-Fi") || !strcmp(rows[i].text, "Forwarding"))
+      assert(rows[i].y - rows[i - 1].y == GLYPH_H + 1);
   up = false;
   draw();
   assert(has("Wi-Fi offline"));
@@ -216,7 +224,7 @@ int main(int argc, char **argv) {
   cfg.wu_map_count = 0;
   draw();
   assert(has("No uploaders") && !has("RL 24h: 12") && !has("WU 24h: 34"));
-  cfg.wifi_interception_enabled = 1;
+  cfg.bridge_wifi_auto_off = 1;
   ap = true;
   draw();
   assert(has("RL 24h: 12") && has("WiFi: 2 clients"));

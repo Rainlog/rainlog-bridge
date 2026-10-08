@@ -1,7 +1,7 @@
 #include "config_store.h"
 
-#include <errno.h>
 #include <ctype.h>
+#include <errno.h>
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -9,11 +9,11 @@
 #include <strings.h>
 
 #include "activity.h"
-#include "net/ap_client_gauges.h"
 #include "board.h"
 #include "config.h"
 #include "esp_log.h"
 #include "esp_mac.h"
+#include "net/ap_client_gauges.h"
 #include "nvs.h"
 #include "radio/weather_decode.h"
 
@@ -30,8 +30,8 @@ static bridge_config_t s_cfg;
 const config_field_t config_fields[] = {
 #if RAINLOG_RADIO
     NUMBER_FIELD(radio_enabled, 1),
-    NUMBER_FIELD(wifi_interception_enabled, 1),
 #endif
+    NUMBER_FIELD(bridge_wifi_auto_off, 1),
     STRING_FIELD(sta_ssid),
     STRING_FIELD(sta_pass),
     STRING_FIELD(ap_ssid),
@@ -50,11 +50,11 @@ const size_t config_field_count =
 // NVS keys are limited to 15 bytes, independent of descriptive API names.
 static const char *field_keys[] = {
 #if RAINLOG_RADIO
-    "radio_enabled", "wifi_capture",
+    "radio_enabled",
 #endif
-    "sta_ssid",      "sta_pass",     "ap_ssid",  "ap_pass",  "rl_host",
-    "wu_host",       "wu_path",      "ota_host", "ota_path", "disp_full",
-    "disp_dim",      "disp_idle",    "led_level"};
+    "ap_auto_off",   "sta_ssid", "sta_pass",  "ap_ssid",  "ap_pass",
+    "rl_host",       "wu_host",  "wu_path",   "ota_host", "ota_path",
+    "disp_full",     "disp_dim", "disp_idle", "led_level"};
 _Static_assert(sizeof(field_keys) / sizeof(field_keys[0]) ==
                    sizeof(config_fields) / sizeof(config_fields[0]),
                "setting keys");
@@ -84,10 +84,6 @@ const char *config_validate(const bridge_config_t *cfg) {
       strpbrk(cfg->ota_manifest_path, "\r\n ?#"))
     return "invalid path";
 #if RAINLOG_RADIO
-  if (!cfg->radio_enabled && !cfg->wifi_interception_enabled)
-    return "Enable at least one reception source";
-  if (cfg->provisioned && !cfg->wifi_interception_enabled && !cfg->sta_ssid[0])
-    return "Home Wi-Fi required when Wi-Fi interception is disabled";
   if (cfg->radio_map_count > RADIO_MAP_MAX) return "too many radio mappings";
   for (unsigned i = 0; i < cfg->radio_map_count; i++) {
     const radio_mapping_t *m = &cfg->radio_map[i];
@@ -157,9 +153,9 @@ void config_load(void) {
   memset(s_cfg.wu_map, 0, sizeof(s_cfg.wu_map));
   s_cfg.wu_map_count = 0;
   s_cfg.provisioned = false;
+  s_cfg.bridge_wifi_auto_off = 1;
 #if RAINLOG_RADIO
   s_cfg.radio_enabled = 1;
-  s_cfg.wifi_interception_enabled = 0;
   memset(s_cfg.radio_map, 0, sizeof(s_cfg.radio_map));
   s_cfg.radio_map_count = 0;
 #endif
@@ -213,12 +209,6 @@ void config_load(void) {
     nvs_get_u8(h, "radio_n", &count);
     s_cfg.radio_map_count = count <= RADIO_MAP_MAX ? count : 0;
   }
-#endif
-#if RAINLOG_RADIO
-  // Older firmware allowed both sources off. Restore radio reception while
-  // retaining the existing network credentials and station mappings.
-  if (!s_cfg.radio_enabled && !s_cfg.wifi_interception_enabled)
-    s_cfg.radio_enabled = 1;
 #endif
   uint8_t u;
   if (nvs_get_u8(h, "provd", &u) == ESP_OK) {
@@ -353,15 +343,6 @@ const radio_mapping_t *config_find_radio_mapping(uint8_t model,
   return NULL;
 }
 #endif
-
-bool config_wifi_interception_enabled(void) {
-#if RAINLOG_RADIO
-  // Keep first-time setup reachable before home Wi-Fi is configured.
-  return !s_cfg.provisioned || s_cfg.wifi_interception_enabled != 0;
-#else
-  return true;
-#endif
-}
 
 bool config_gauge_uses_radio(uint32_t gauge_id) {
 #if RAINLOG_RADIO

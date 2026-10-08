@@ -5,19 +5,20 @@
 #include <string.h>
 #include <strings.h>
 
+#include "activity.h"
 #include "ap_clients.h"
-#include "nvs.h"
 #include "capture_server.h"
 #include "config.h"
 #include "config_store.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
+#include "esp_ota_ops.h"
 #include "esp_system.h"
 #include "esp_timer.h"
-#include "http_util.h"
-#include "ota_update.h"
 #include "firmware_image.h"
-#include "esp_ota_ops.h"
+#include "http_util.h"
+#include "nvs.h"
+#include "ota_update.h"
 #include "radio/radio.h"
 #include "session_auth.h"
 #include "wifi_link.h"
@@ -184,13 +185,15 @@ static void json_escape(const char *src, char *dst, size_t dstsize) {
   dst[o] = '\0';
 }
 
-// GET /, /setup, /devices, /firmware: the embedded single-file config page (static, no templating). Field
-// values are filled client-side from /config. A LAN visitor without a session
-// gets the sign-in page instead of the config page.
+// GET /, /setup, /devices, /firmware: the embedded single-file config page
+// (static, no templating). Field values are filled client-side from /config. A
+// LAN visitor without a session gets the sign-in page instead of the config
+// page.
 static esp_err_t page_handler(httpd_req_t *req) {
   if (!authorized(req)) {
     return session_auth_send_login_page(req, false);
   }
+  activity_poke();
   httpd_resp_set_type(req, "text/html");
   httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
   return httpd_resp_send(req, (const char *)index_html_gz_start,
@@ -252,9 +255,12 @@ char *config_server_config_json(void) {
   wifi_link_ap_ip_str(ap_ip, sizeof(ap_ip));
   int o = snprintf(json, PAGE_MAX,
                    "{\"sta_ssid\":\"%s\",\"ap_ssid\":\"%s\","
-                   "\"ap_pass_default\":%s,\"ap_ip\":\"%s\",\"wu_map\":[",
+                   "\"ap_pass_default\":%s,\"ap_ip\":\"%s\","
+                   "\"bridge_wifi_auto_off\":%s,\"bridge_wifi_active\":%s,\"wu_map\":[",
                    sta_ssid, ap_ssid,
-                   ap_pass_is_default(cfg->ap_pass) ? "true" : "false", ap_ip);
+                   ap_pass_is_default(cfg->ap_pass) ? "true" : "false", ap_ip,
+                   cfg->bridge_wifi_auto_off ? "true" : "false",
+                   wifi_link_ap_enabled() ? "true" : "false");
   for (uint8_t i = 0; i < cfg->wu_map_count && o > 0 && o < PAGE_MAX; i++) {
     char device[sizeof(cfg->wu_map[i].device) * 6];
     json_escape(cfg->wu_map[i].device, device, sizeof(device));
@@ -263,18 +269,16 @@ char *config_server_config_json(void) {
     json_escape(cfg->wu_map[i].wu_id, wu_id, sizeof(wu_id));
     json_escape(cfg->wu_map[i].wu_key, wu_key, sizeof(wu_key));
     o += snprintf(json + o, PAGE_MAX - o,
-                  "%s{\"gauge_id\":%lu,\"wu_id\":\"%s\",\"wu_key\":\"%s\",\"device\":\"%s\"}",
+                  "%s{\"gauge_id\":%lu,\"wu_id\":\"%s\",\"wu_key\":\"%s\","
+                  "\"device\":\"%s\"}",
                   i ? "," : "", (unsigned long)cfg->wu_map[i].gauge_id, wu_id,
                   wu_key, device);
   }
 #if RAINLOG_RADIO
   if (o > 0 && o < PAGE_MAX)
     o += snprintf(json + o, PAGE_MAX - o,
-                  "],\"radio_enabled\":%s,\"wifi_interception_enabled\":%s,"
-                  "\"wifi_interception_active\":%s,\"radio_map\":[",
-                  cfg->radio_enabled ? "true" : "false",
-                  cfg->wifi_interception_enabled ? "true" : "false",
-                  wifi_link_ap_enabled() ? "true" : "false");
+                  "],\"radio_enabled\":%s,\"radio_map\":[",
+                  cfg->radio_enabled ? "true" : "false");
   for (unsigned i = 0; i < cfg->radio_map_count && o > 0 && o < PAGE_MAX; i++) {
     const radio_mapping_t *m = &cfg->radio_map[i];
     char name[198];
@@ -328,7 +332,8 @@ char *config_server_radio_json(void) {
     o += snprintf(
         json + o, PAGE_MAX - o,
         "%s{\"model\":%u,\"sensor_id\":%u,\"channel\":%u,\"age_s\":%"
-        "lld,\"gauge_id\":%lu,\"has_rain\":%s,\"rain_raw\":%u,\"packets\":%lu,\"rssi_dbm\":%.1f,\"name\":\"%s\"}",
+                  "lld,\"gauge_id\":%lu,\"has_rain\":%s,\"rain_raw\":%u,"
+                  "\"packets\":%lu,\"rssi_dbm\":%.1f,\"name\":\"%s\"}",
         seen++ ? "," : "", p->model, p->id, (unsigned char)p->channel,
         (long long)((now - sensors[i].reading.received_us) / 1000000),
         m ? (unsigned long)m->gauge_id : 0, p->has_rain ? "true" : "false",
@@ -554,20 +559,15 @@ esp_err_t config_server_save_form(const char *body, const char **error) {
     n++;
   }
   cfg.wu_map_count = n;
+  cfg.bridge_wifi_auto_off =
+      http_util_form_get(body, "bridge_wifi_auto_off", tmp, sizeof(tmp)) ? 1
+                                                                         : 0;
 
 #if RAINLOG_RADIO
-  // A marker distinguishes a radio form from older clients without radio
-  // fields.
+  // Radio fields are only present on radio boards.
   if (http_util_form_get(body, "radio_form", tmp, sizeof(tmp))) {
-    bool has_interception_switch = !strcmp(tmp, "2");
     cfg.radio_enabled =
         http_util_form_get(body, "radio_enabled", tmp, sizeof(tmp)) ? 1 : 0;
-    if (has_interception_switch)
-      cfg.wifi_interception_enabled =
-          http_util_form_get(body, "wifi_interception_enabled", tmp,
-                             sizeof(tmp))
-              ? 1
-              : 0;
     memset(cfg.radio_map, 0, sizeof(cfg.radio_map));
     cfg.radio_map_count = 0;
     for (unsigned i = 0; i < RADIO_MAP_MAX; i++) {
@@ -615,11 +615,7 @@ esp_err_t config_server_save_form(const char *body, const char **error) {
     }
   }
 #endif
-  *error =
-#if RAINLOG_RADIO
-      cfg.wifi_interception_enabled &&
-#endif
-      ap_pass_is_default(cfg.ap_pass)
+  *error = ap_pass_is_default(cfg.ap_pass)
                ? "Please choose a Bridge Wi-Fi password (the default cannot be "
                  "kept)."
                : config_validate(&cfg);

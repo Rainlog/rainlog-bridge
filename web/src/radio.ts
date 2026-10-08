@@ -11,7 +11,6 @@ interface RadioMapping {
 }
 interface RadioConfig {
   radio_enabled?: boolean;
-  wifi_interception_enabled?: boolean;
   radio_map?: RadioMapping[];
 }
 interface RadioSensor extends Omit<RadioMapping, 'rainlog_key'> {
@@ -430,9 +429,6 @@ export function createRadio(
   return {
     load(config: RadioConfig): void {
       enabled.checked = config.radio_enabled ?? true;
-      (
-        document.getElementById('wifiInterceptionEnabled') as HTMLInputElement
-      ).checked = config.wifi_interception_enabled ?? false;
       (config.radio_map ?? []).forEach((mapping) => {
         sensorNames.set(sensorIdentity(mapping), mapping.name ?? '');
         addRow(mapping);

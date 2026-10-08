@@ -64,3 +64,6 @@ esp_netif_t *wifi_link_ap_netif(void);
 
 // Whether the Wi-Fi driver currently has the bridge AP enabled.
 bool wifi_link_ap_enabled(void);
+
+// Apply the five-minute idle policy without interrupting the Home uplink.
+void wifi_link_poll(void);

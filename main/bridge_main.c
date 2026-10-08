@@ -113,7 +113,7 @@ void app_main(void) {
   audit_memory("client registry");
   time_sync_start();
   audit_memory("SNTP");
-  if (config_wifi_interception_enabled()) dns_server_start();
+  dns_server_start();
   audit_memory("DNS");
   forwarder_init();
   audit_memory("forwarder");
@@ -133,6 +133,7 @@ void app_main(void) {
   int tick = 0;
   bool marked_valid = false;
   while (true) {
+    wifi_link_poll();
     if (wifi_link_sta_has_ip()) {
       status_led_set_provisioning(false);
     }

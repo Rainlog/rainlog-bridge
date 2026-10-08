@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """LILYGO radio settings integration test, selected serial device is required.
 
-Temporarily saves a test mapping and disables Wi-Fi interception while retaining radio reception, verifies
+Temporarily saves a test mapping and enables five-minute Bridge Wi-Fi idle shutdown while retaining radio reception, verifies
 persistence and LAN setup access after reboot, then restores original settings.
 Requires pyserial/esptool and configured home Wi-Fi. No weather uploads are sent.
 """
@@ -53,15 +53,15 @@ with serial.Serial(sys.argv[1], 115200, timeout=0.1) as port:
         boot()
         original = value('(function(){var c=settings.get(); return '
                          '{radio_map:c.radio_map,radio_enabled:c.radio_enabled,'
-                         'wifi_interception_enabled:c.wifi_interception_enabled};})()')
+                         'bridge_wifi_auto_off:c.bridge_wifi_auto_off};})()')
         password = value('settings.get().ap_pass')
-        patch = {'radio_enabled': True, 'wifi_interception_enabled': False,
+        patch = {'radio_enabled': True, 'bridge_wifi_auto_off': True,
                  'radio_map': [{'model': 0, 'sensor_id': 7, 'channel': 0,
                                 'gauge_id': 4294967294, 'rainlog_key': 'test-only-key'}]}
         command('settings.set(' + json.dumps(patch) + ')')
         output = boot()
-        assert 'HTTPS capture server up' not in output
-        assert 'mode : sta (' in output and 'softAP' not in output
+        assert 'HTTPS capture server up' in output
+        assert 'softAP' in output
         saved = value('settings.get().radio_map')
         assert saved == patch['radio_map']
         assert value('radio.status().receiving')
@@ -79,12 +79,13 @@ with serial.Serial(sys.argv[1], 115200, timeout=0.1) as port:
         # A local setup request should finish in seconds, even during Wi-Fi sleep.
         with urllib.request.urlopen(request, timeout=10) as response:
             config = json.load(response)
-        assert not config['wifi_interception_enabled'] and config['radio_enabled']
+        assert config['bridge_wifi_auto_off'] and config['radio_enabled']
+        assert config['bridge_wifi_active']
         assert config['radio_map'] == patch['radio_map']
         # Exercise real form parsing without saving: duplicate valid rows must
         # be rejected even with a non-default setup password.
         body = {'radio_form': '2', 'radio_enabled': 'on',
-                'wifi_interception_enabled': 'on', 'sta_ssid': config['sta_ssid'],
+                'bridge_wifi_auto_off': 'on', 'sta_ssid': config['sta_ssid'],
                 'ap_ssid': config['ap_ssid'], 'ap_pass': 'parser-test-password'}
         for index in range(2):
             body.update({f'radio_model{index}': '0', f'radio_id{index}': '7',
@@ -97,7 +98,7 @@ with serial.Serial(sys.argv[1], 115200, timeout=0.1) as port:
             assert b'duplicate radio sensor or gauge id' in response.read()
         assert value('settings.get().radio_map') == patch['radio_map']
         print('HTTP mapping form validation passed without changing saved settings')
-        print('Radio mapping persistence, paused reception, STA-only boot and authenticated LAN setup passed')
+        print('Radio mapping persistence, radio reception, AP+STA boot and authenticated LAN setup passed')
     finally:
         if original is not None:
             command('settings.set(' + json.dumps(original) + ')')

@@ -393,10 +393,6 @@ button {
   font-family: inherit;
 }
 
-#reception_err:empty {
-  display: none;
-}
-
 #manualUpdate {
   margin-top: 1.5em;
   padding-top: 1em;

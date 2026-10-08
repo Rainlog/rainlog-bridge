@@ -32,8 +32,8 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "playwright");
           ap_ip: "10.41.0.1",
           wu_map: wuMappings,
           radio_enabled: true,
-          wifi_interception_enabled: false,
-          wifi_interception_active: radioPage ? wifiActive : true,
+          bridge_wifi_auto_off: true,
+          bridge_wifi_active: radioPage ? wifiActive : true,
           radio_map: radioMappings,
         }),
       );
@@ -156,16 +156,13 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "playwright");
   await page.getByRole('link', {name: 'Setup', exact: true}).click();
   assert.equal(new URL(page.url()).pathname, '/setup');
   await page.waitForFunction(() => document.querySelector('[name=ap_ssid]').value !== '');
-  assert.equal(await page.locator('[name=ap_ssid]').isDisabled(), true);
-  assert.equal(await page.locator('[name=ap_pass]').isDisabled(), true);
-  assert.equal(await page.locator('#radioEnabled').isDisabled(), true);
-  await page.locator('#wifiInterceptionEnabled').check();
-  await page.locator('#radioEnabled').uncheck();
-  assert.equal(await page.locator('#wifiInterceptionEnabled').isDisabled(), true);
-  await page.locator('#radioEnabled').check();
   assert.equal(await page.locator('[name=ap_ssid]').isEnabled(), true);
   assert.equal(await page.locator('[name=ap_pass]').isEnabled(), true);
-  await page.locator('#wifiInterceptionEnabled').uncheck();
+  assert.equal(await page.locator('#bridgeWifiAutoOff').isChecked(), true);
+  await page.locator('#radioEnabled').uncheck();
+  assert.equal(await page.locator('#bridgeWifiAutoOff').isEnabled(), true);
+  await page.locator('#radioEnabled').check();
+  await page.locator('#bridgeWifiAutoOff').uncheck();
   assert.equal(await page.locator('#radioSetup button').count(), 0);
   assert.equal(await page.locator('#radioSetup #radioRows').count(), 0);
   await page.locator('#radioStatus').getByText('Radio reception enabled. 2 devices seen.', {exact: true}).waitFor();
@@ -272,7 +269,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "playwright");
   assert.equal(saved.get("radio_gauge0"), "Rainlog12346");
   assert.equal(saved.get("radio_key0"), "test-pws-key");
   assert.equal(saved.get("radio_enabled"), "on");
-  assert.equal(saved.get("wifi_interception_enabled"), null);
+  assert.equal(saved.get("bridge_wifi_auto_off"), null);
   wuMappings = [{gauge_id:54321, wu_id:'KSAVED', wu_key:'saved-key'}];
   radioMappings = [
     {model: 0, sensor_id: 9, channel: 0, gauge_id: 54321, rainlog_key: 'keep-tx5u-key'},
@@ -309,7 +306,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "playwright");
     .locator("#radioDeviceList")
     .getByText("La Crosse TX5U", { exact: false })
     .waitFor();
-  assert.equal(await page.locator("#wifiDevices").isVisible(), false);
+  assert.equal(await page.locator("#wifiDevices").isVisible(), true);
   assert.equal(await page.getByText('Other WU Uploaders', {exact: true}).count(), 0);
   assert.equal(await page.locator('#addBtn').count(), 0);
   radioPage = false;
@@ -324,7 +321,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "playwright");
   assert.equal(await page.locator('.wifi-card').getByRole('button', {name:'Add WU Uploader', exact:true}).isEnabled(), true);
 
   assert.equal(await page.locator("#radioSetup").count(), 0);
-  assert.equal(await page.locator("#wifiInterceptionEnabled").count(), 0);
+  assert.equal(await page.locator("#bridgeWifiAutoOff").count(), 1);
   await page.getByRole("link", {name: 'Firmware', exact: true}).click();
   otaPhase = "available";
   await page.getByText('Update available: v1.0.0 → v1.0.1', {exact:true}).waitFor();

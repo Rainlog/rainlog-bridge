@@ -55,7 +55,7 @@ js radio.tune(433930000, 250000, 15)
 ```
 
 Console tuning and receive controls last until reboot. The website radio
-checkbox, Wi-Fi interception checkbox and sensor-to-Rainlog mappings persist in NVS and apply on reboot.
+checkbox, Bridge Wi-Fi idle shutdown checkbox and sensor-to-Rainlog mappings persist in NVS and apply on reboot.
 The radio-enabled Devices tab lists recently received sensors and supports
 selection from detected sensors, Rainlog station IDs and PWS keys. Mappings can also be
 managed through `settings.get().radio_map` and `settings.set({radio_map: [...]})`.
@@ -83,13 +83,14 @@ counter 3, including the repeated packet pair. It appeared in the website's
 received sensor list. Battery replacement can change sensor IDs, so check the
 list and update the mapping after replacing a sensor battery.
 
-Disabling Wi-Fi interception turns off the bridge SoftAP, DNS interception
-and WU capture endpoints, including their HTTPS server. Home Wi-Fi and the
-setup page remain available on the home LAN. The setup password remains the
-Bridge Wi-Fi password, even when that Wi-Fi network is disabled. Home Wi-Fi
-must be configured before disabling interception. Both switches apply after
-Save and reboot. Radio builds default to interception off; unconfigured boards
-keep setup Wi-Fi available until provisioning. Saved choices override defaults.
+Bridge Wi-Fi starts on every boot. The “Turn off Bridge Wi-Fi after 5 idle
+minutes” setting defaults on and stops the SoftAP after 300 seconds with no
+connected clients or local activity. Connected consoles keep it awake between
+uploads. Setup and a missing Home Wi-Fi uplink keep it available. A button
+press, restart, or opening the setup page through Home Wi-Fi wakes it again.
+Home Wi-Fi, radio reception and LAN setup access continue while it sleeps;
+the Bridge Wi-Fi password remains the setup password. Uncheck the setting to
+keep Bridge Wi-Fi on continuously.
 
 ## Radio uploads
 
