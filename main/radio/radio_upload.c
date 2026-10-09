@@ -90,8 +90,9 @@ void radio_upload_poll(bool (*submit)(const char *)) {
       if (p->model == map.model && p->id == map.sensor_id && p->channel == map.channel)
         reading = &sensors[j].reading;
     }
-    if (!reading || !reading->packet.has_rain) continue;
-    if (rain_counter_update(&states[i].counter, counter_gauge, &reading->packet))
+    if (!reading) continue;
+    if (reading->packet.has_rain &&
+        rain_counter_update(&states[i].counter, counter_gauge, &reading->packet))
       states[i].dirty = true;
     if (states[i].dirty) {
       if (!save_counter(storage_key, &states[i].counter)) {
@@ -100,15 +101,17 @@ void radio_upload_poll(bool (*submit)(const char *)) {
       }
       states[i].dirty = false;
     }
-    // Publish the latest counter every 300 seconds, even without a new frame.
+    // TX5U repeats its counter; Iris uploads only fields received within five minutes.
     if (states[i].last_upload && now - states[i].last_upload < UPLOAD_INTERVAL_US)
       continue;
     time_t observed = wall;
     if (observed < 1600000000) continue; // Wait for SNTP; never backdate with "now".
     // This is a current counter snapshot; retries retain this timestamp.
     char query[768];
+    weather_packet_t snapshot = reading->packet;
+    weather_expire_iris(&snapshot, now);
     if (!rain_upload_encode(query, sizeof(query), map.gauge_id, map.rainlog_key,
-                            &reading->packet, states[i].counter.total_microin, observed))
+                            &snapshot, states[i].counter.total_microin, observed))
       continue;
     if (submit(query)) {
       states[i].last_upload = now;

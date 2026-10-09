@@ -154,12 +154,9 @@ static void record_duration(bool high, uint32_t duration) {
     memset(&seen_sensors[slot], 0, sizeof(seen_sensors[slot]));
   }
   weather_packet_t known = packet;
+  weather_stamp_iris(&known, now);
   const weather_packet_t *old = &seen_sensors[slot].reading.packet;
-  if (!known.has_rain && old->has_rain) {
-    known.has_rain = true;
-    known.rain_raw = old->rain_raw;
-    known.rain_mm = old->rain_mm;
-  }
+  weather_merge_iris(&known, old);
   seen_sensors[slot].reading = (radio_reading_t){
       .packet = known, .received_us = now, .rssi_dbm = status.rssi_dbm};
   seen_sensors[slot].packets++;

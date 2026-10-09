@@ -97,22 +97,41 @@ keep Bridge Wi-Fi on continuously.
 
 ## Radio uploads
 
-Sensors with a Rainlog or device-keyed WU uploader and a decoded rain counter upload. The forwarder task
+Sensors with a Rainlog or device-keyed WU uploader upload decoded readings
+(TX5U requires a rain counter; Iris can upload fresh weather fields without rain). The forwarder task
 polls the latest sensor inventory each second and queues encoded snapshots,
 so TLS never runs in the pulse capture task or on the encoder call stack. Each gauge queues a snapshot every 300 seconds, including unchanged totals
-and cached readings when no new frame has arrived. SNTP must establish a wall
+and cached readings when no new frame has arrived. Iris fields expire at five
+minutes since their supplying packet:
+temperature/humidity (and derived dew point), direction/rain, and wind/battery
+each retain their own reception time. Other packet types do not refresh it.
+Expired fields are omitted; a fresh temperature packet can upload without an
+expired rain counter. If all Iris fields expire, uploads stop until reception
+resumes. TX5U periodic counter snapshots are unchanged. SNTP must establish a wall
 clock first. `dateutc` is the snapshot time, preserved through the existing
 LittleFS retry queue.
 
 `ID=Rainlog<gauge_id>` and `PASSWORD=<PWS key>` come from the saved Rainlog mapping. WU-only sensors omit these credentials and skip Rainlog entirely; WU credentials are selected by model/ID/channel. Combined uploaders share one encoded snapshot. Legacy WU gauge mappings remain readable and keep working.
 `totalrainin` is the cumulative counter in inches, using 0.0105 in per TX5U tip
-and 0.01 in per Iris tip. Counter baselines and expanded totals are stored in
+and 0.01 in per Iris tip, matching [AcuRite's Iris specifications](https://www.acurite.com/pages/iris-landing-page).
+Counter baselines and expanded totals are stored in
 the `radio_rain` NVS namespace (legacy Rainlog gauge keys, or sensor identity keys for WU-only sensors) before transmission and only rewritten when
 they change. Normal rollover is expanded; other decreases and sensor identity
 changes rebase without adding old rain. A same-ID reset near the end of its
 counter range cannot be distinguished from rollover, and multiple complete
 wraps during a reception outage cannot be recovered. Iris snapshots include
-wind and the temperature/humidity fields actually available in that frame.
+wind and the latest received temperature/humidity and direction fields from
+both Iris frame types, combined in the sensor inventory.
+Iris uses the console's `mt=5N1` and `sensorbattery=normal|low` fields.
+Uploads also include `dewptf`, calculated from the latest received
+temperature/humidity pair with the Magnus formula over water (omitted at 0% humidity).
+Once both Iris frame types have arrived, each upload includes `winddir`,
+`tempf`, `humidity` and `dewptf` together. Wind speed and battery status come
+from the newest frame. Values never cross model, sensor ID or channel, and
+fields not yet received this boot remain absent. Raw packet history retains
+the individual frames. TX5U reception and uploads do not use this merge.
+Console-only pressure, hub battery, gust/average wind and hub signal strength
+are not available from the decoded radio packet and are omitted.
 Hourly and daily rain are omitted rather than guessed.
 
 Rainlog uploads carry individual `bridge_model` (compile-time board ID),

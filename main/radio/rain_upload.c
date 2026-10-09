@@ -1,4 +1,5 @@
 #include "rain_upload.h"
+#include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
@@ -54,7 +55,9 @@ static bool append(char *out, size_t size, size_t *used, const char *fmt, ...) {
 bool rain_upload_encode(char *out, size_t size, uint32_t gauge,
                         const char *key, const weather_packet_t *p,
                         uint64_t total_microin, time_t observed) {
-  if (!size || !key || (gauge && !*key) || !p->has_rain ||
+  bool iris = p->model == WEATHER_ACURITE_5N1;
+  if (!size || !key || (gauge && !*key) ||
+      (!p->has_rain && !(iris && (p->has_wind || p->has_temperature || p->has_wind_direction))) ||
       !counter_modulus(p) || observed < 1600000000) return false;
   struct tm utc;
   if (!gmtime_r(&observed, &utc)) return false;
@@ -70,24 +73,37 @@ bool rain_upload_encode(char *out, size_t size, uint32_t gauge,
   }
   if (!append(out, size, &used,
       "&dateutc=%04d-%02d-%02d%%20%02d%%3A%02d%%3A%02d"
-      "&action=updateraw&totalrainin=%llu.%06llu"
-      "&softwaretype=RainlogBridgeRadio&rlsource=radio&sensor_model=%s&sensor_id=%u",
+      "&action=updateraw",
       utc.tm_year + 1900, utc.tm_mon + 1, utc.tm_mday,
-      utc.tm_hour, utc.tm_min, utc.tm_sec,
+      utc.tm_hour, utc.tm_min, utc.tm_sec)) return false;
+  if (p->has_rain && !append(out, size, &used, "&totalrainin=%llu.%06llu",
       (unsigned long long)(total_microin / 1000000),
-      (unsigned long long)(total_microin % 1000000),
+      (unsigned long long)(total_microin % 1000000))) return false;
+  if (!append(out, size, &used,
+      "&softwaretype=RainlogBridgeRadio&rlsource=radio&sensor_model=%s&sensor_id=%u",
       p->model == WEATHER_LACROSSE_TX5U ? "LaCrosse-TX5U" : "AcuRite-Iris-5n1", p->id))
     return false;
   if (p->model == WEATHER_LACROSSE_TX5U &&
       !append(out, size, &used, "&sensor_channel=")) return false;
   if (p->model == WEATHER_ACURITE_5N1) {
-    if (!append(out, size, &used, "&sensor_channel=%c&windspeedmph=%.2f", p->channel,
-                p->wind_kph / 1.609344)) return false;
-    if (p->message_type == 49 &&
+    if (!append(out, size, &used, "&sensor_channel=%c&mt=5N1", p->channel)) return false;
+    if (p->has_wind && !append(out, size, &used, "&windspeedmph=%.2f",
+                               p->wind_kph / 1.609344)) return false;
+    if (p->has_battery && !append(out, size, &used, "&sensorbattery=%s",
+                                 p->battery_ok ? "normal" : "low")) return false;
+    if (p->has_wind_direction &&
         !append(out, size, &used, "&winddir=%.0f", p->wind_direction)) return false;
     if (p->has_temperature &&
         !append(out, size, &used, "&tempf=%.2f&humidity=%.0f",
                 p->temperature_c * 1.8 + 32, p->humidity)) return false;
+    // Magnus dew point over water, calculated only from this packet's pair.
+    // Zero relative humidity has no finite dew point.
+    if (p->has_temperature && p->humidity > 0 && p->humidity <= 100) {
+      double gamma = log(p->humidity / 100.0) +
+                     17.62 * p->temperature_c / (243.12 + p->temperature_c);
+      double dewpoint_f = 243.12 * gamma / (17.62 - gamma) * 1.8 + 32;
+      if (!append(out, size, &used, "&dewptf=%.0f", dewpoint_f)) return false;
+    }
   }
   return true;
 }

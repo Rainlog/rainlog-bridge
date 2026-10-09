@@ -3,6 +3,49 @@
 #include "weather_decode.h"
 
 #include <string.h>
+
+void weather_stamp_iris(weather_packet_t *p, int64_t received_us) {
+  if (p->model != WEATHER_ACURITE_5N1) return;
+  p->has_wind = p->has_battery = true;
+  p->wind_received_us = received_us;
+  if (p->has_rain) p->rain_received_us = received_us;
+  if (p->has_temperature) p->temperature_received_us = received_us;
+  if (p->has_wind_direction) p->wind_direction_received_us = received_us;
+}
+
+void weather_expire_iris(weather_packet_t *p, int64_t now_us) {
+  if (p->model != WEATHER_ACURITE_5N1) return;
+  if (now_us - p->rain_received_us >= IRIS_FIELD_FRESHNESS_US) p->has_rain = false;
+  if (now_us - p->temperature_received_us >= IRIS_FIELD_FRESHNESS_US)
+    p->has_temperature = false;
+  if (now_us - p->wind_direction_received_us >= IRIS_FIELD_FRESHNESS_US)
+    p->has_wind_direction = false;
+  if (now_us - p->wind_received_us >= IRIS_FIELD_FRESHNESS_US)
+    p->has_wind = p->has_battery = false;
+}
+
+void weather_merge_iris(weather_packet_t *current, const weather_packet_t *previous) {
+  if (current->model != WEATHER_ACURITE_5N1 ||
+      previous->model != current->model || previous->id != current->id ||
+      previous->channel != current->channel) return;
+  if (!current->has_rain && previous->has_rain) {
+    current->has_rain = true;
+    current->rain_raw = previous->rain_raw;
+    current->rain_mm = previous->rain_mm;
+    current->rain_received_us = previous->rain_received_us;
+  }
+  if (!current->has_temperature && previous->has_temperature) {
+    current->has_temperature = true;
+    current->temperature_c = previous->temperature_c;
+    current->humidity = previous->humidity;
+    current->temperature_received_us = previous->temperature_received_us;
+  }
+  if (!current->has_wind_direction && previous->has_wind_direction) {
+    current->has_wind_direction = true;
+    current->wind_direction = previous->wind_direction;
+    current->wind_direction_received_us = previous->wind_direction_received_us;
+  }
+}
 #if WEATHER_PROTOCOL_OOK
 static unsigned parity(unsigned value) {
   unsigned result = 0;
@@ -57,6 +100,7 @@ bool weather_decode_acurite(const uint8_t bytes[8], weather_packet_t *out) {
                             .wind_kph = wind ? wind * 0.8278f + 1.0f : 0};
   if (type == 49) {
     out->has_rain = true;
+    out->has_wind_direction = true;
     out->rain_raw = ((bytes[5] & 127) << 7) | (bytes[6] & 127);
     out->rain_mm = out->rain_raw * 0.254f;
     out->wind_direction = directions[bytes[4] & 15] * 22.5f;
